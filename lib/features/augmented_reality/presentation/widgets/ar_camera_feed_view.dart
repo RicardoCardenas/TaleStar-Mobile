@@ -14,12 +14,15 @@ import '../../../../core/config/app_config.dart';
 class ArCameraFeedView extends StatelessWidget {
   const ArCameraFeedView({super.key});
 
+  static bool get usesNativeScene =>
+      !kIsWeb &&
+      Platform.isAndroid &&
+      !AppConfig.instance.useMockAr &&
+      !Platform.environment.containsKey('FLUTTER_TEST');
+
   @override
   Widget build(BuildContext context) {
-    final bool isRealAndroidAr = !kIsWeb &&
-        Platform.isAndroid &&
-        !AppConfig.instance.useMockAr &&
-        !Platform.environment.containsKey('FLUTTER_TEST');
+    final bool isRealAndroidAr = usesNativeScene;
 
     if (isRealAndroidAr) {
       return const AndroidView(
@@ -33,10 +36,7 @@ class ArCameraFeedView extends StatelessWidget {
         gradient: RadialGradient(
           center: Alignment.center,
           radius: 1.1,
-          colors: [
-            Color(0xFF1C1A29),
-            Color(0xFF0C0A14),
-          ],
+          colors: [Color(0xFF1C1A29), Color(0xFF0C0A14)],
         ),
       ),
     );

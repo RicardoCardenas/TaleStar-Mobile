@@ -27,10 +27,12 @@ void main() {
   setUp(() {
     mockArCubit = MockArCubit();
     when(() => mockArCubit.stream).thenAnswer((_) => const Stream.empty());
-    when(() => mockArCubit.startArExperience(
-          storyId: any(named: 'storyId'),
-          initialPageIndex: any(named: 'initialPageIndex'),
-        )).thenAnswer((_) async => true);
+    when(
+      () => mockArCubit.startArExperience(
+        storyId: any(named: 'storyId'),
+        initialPageIndex: any(named: 'initialPageIndex'),
+      ),
+    ).thenAnswer((_) async => true);
     when(() => mockArCubit.placeStory()).thenAnswer((_) async => true);
     when(() => mockArCubit.exitAr()).thenAnswer((_) async {});
   });
@@ -46,55 +48,114 @@ void main() {
   }
 
   group('ArSurfaceScannerScreen Widget', () {
-    testWidgets('muestra estado de escaneo inicial e instrucciones en español', (tester) async {
-      when(() => mockArCubit.state).thenReturn(
-        const ArState(status: ArStatus.scanningSurface),
-      );
+    testWidgets(
+      'muestra estado de escaneo inicial e instrucciones en español',
+      (tester) async {
+        when(
+          () => mockArCubit.state,
+        ).thenReturn(const ArState(status: ArStatus.scanningSurface));
 
-      await tester.pumpWidget(buildTestWidget());
-      await tester.pump();
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pump();
 
-      expect(find.text('Escaneando entorno...'), findsOneWidget);
-      expect(find.textContaining('Mueve el teléfono lentamente'), findsOneWidget);
+        expect(find.text('Escaneando entorno...'), findsOneWidget);
+        expect(
+          find.textContaining('Mueve el teléfono lentamente'),
+          findsOneWidget,
+        );
 
-      final placeBtn = find.byKey(const Key('ar_place_story_button'));
-      expect(placeBtn, findsOneWidget);
-      // Cuando no hay plano detectado, el botón está deshabilitado
-      final buttonWidget = tester.widget<ElevatedButton>(find.descendant(
-        of: placeBtn,
-        matching: find.byType(ElevatedButton),
-      ));
-      expect(buttonWidget.onPressed, isNull);
-    });
+        final placeBtn = find.byKey(const Key('ar_place_story_button'));
+        expect(placeBtn, findsOneWidget);
+        // Cuando no hay plano detectado, el botón está deshabilitado
+        final buttonWidget = tester.widget<ElevatedButton>(
+          find.descendant(of: placeBtn, matching: find.byType(ElevatedButton)),
+        );
+        expect(buttonWidget.onPressed, isNull);
+      },
+    );
 
-    testWidgets('cuando se detecta una superficie muestra el plano y habilita el botón de colocar cuento', (tester) async {
+    testWidgets(
+      'un punto confirmado habilita colocar sin un plano decorativo de pantalla',
+      (tester) async {
+        when(() => mockArCubit.state).thenReturn(
+          const ArState(
+            status: ArStatus.surfaceDetected,
+            detectedPlanes: [tPlane],
+            selectedPlane: tPlane,
+            hasValidPlacementPoint: true,
+            placementPointType: 'CONFIRMED_PLANE',
+          ),
+        );
+
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pump();
+
+        expect(find.textContaining('¡Superficie lista!'), findsOneWidget);
+        expect(
+          find.byKey(const Key('ar_detected_plane_visualizer')),
+          findsNothing,
+        );
+
+        final placeBtn = find.byKey(const Key('ar_place_story_button'));
+        expect(placeBtn, findsOneWidget);
+
+        await tester.tap(placeBtn);
+        await tester.pump();
+
+        verify(() => mockArCubit.placeStory()).called(1);
+      },
+    );
+
+    testWidgets('coloca con apoyo instantáneo sin esperar un plano completo', (
+      tester,
+    ) async {
       when(() => mockArCubit.state).thenReturn(
         const ArState(
           status: ArStatus.surfaceDetected,
-          detectedPlanes: [tPlane],
-          selectedPlane: tPlane,
+          cameraTrackingState: 'TRACKING',
+          hasValidPlacementPoint: true,
+          hasHitAtReticle: true,
+          placementPointType: 'INSTANT_PLACEMENT',
         ),
       );
-
       await tester.pumpWidget(buildTestWidget());
       await tester.pump();
-
-      expect(find.textContaining('Superficie detectada'), findsOneWidget);
-      expect(find.byKey(const Key('ar_detected_plane_visualizer')), findsOneWidget);
-
-      final placeBtn = find.byKey(const Key('ar_place_story_button'));
-      expect(placeBtn, findsOneWidget);
-
-      await tester.tap(placeBtn);
+      expect(find.text('Apoyo estimado'), findsOneWidget);
+      expect(find.text('Colocar aquí'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('ar_place_story_button')));
       await tester.pump();
-
       verify(() => mockArCubit.placeStory()).called(1);
     });
 
+    testWidgets(
+      'ofrece distancia manual cuando la cámara sigue pero no hay superficie',
+      (tester) async {
+        when(() => mockArCubit.state).thenReturn(
+          const ArState(
+            status: ArStatus.scanningSurface,
+            cameraTrackingState: 'TRACKING',
+          ),
+        );
+        when(
+          () => mockArCubit.placeEstimatedStory(any()),
+        ).thenAnswer((_) async => true);
+        await tester.pumpWidget(buildTestWidget());
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('ar_manual_placement')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(find.byKey(const Key('ar_manual_distance')), findsOneWidget);
+        expect(find.text('75 cm'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('ar_manual_confirm')));
+        await tester.pump(const Duration(milliseconds: 400));
+        verify(() => mockArCubit.placeEstimatedStory(.75)).called(1);
+      },
+    );
+
     testWidgets('botón Salir invoca exitAr en el cubit', (tester) async {
-      when(() => mockArCubit.state).thenReturn(
-        const ArState(status: ArStatus.scanningSurface),
-      );
+      when(
+        () => mockArCubit.state,
+      ).thenReturn(const ArState(status: ArStatus.scanningSurface));
 
       await tester.pumpWidget(buildTestWidget());
       await tester.pump();
@@ -108,34 +169,45 @@ void main() {
       verify(() => mockArCubit.exitAr()).called(1);
     });
 
-    testWidgets('cuando el hardware es incompatible muestra diálogo informativo constructivo', (tester) async {
-      final stateController = StreamController<ArState>.broadcast();
-      when(() => mockArCubit.stream).thenAnswer((_) => stateController.stream);
+    testWidgets(
+      'cuando el hardware es incompatible muestra diálogo informativo constructivo',
+      (tester) async {
+        final stateController = StreamController<ArState>.broadcast();
+        when(
+          () => mockArCubit.stream,
+        ).thenAnswer((_) => stateController.stream);
 
-      const errorState = ArState(
-        status: ArStatus.error,
-        compatibilityInfo: ArCompatibilityInfo(
-          isSupported: false,
-          availability: ArCoreAvailability.unsupportedDeviceNotCapable,
-          deviceModel: 'Xiaomi Redmi Note 13 4G (23129RA5FL)',
-          userMessage:
+        const errorState = ArState(
+          status: ArStatus.error,
+          compatibilityInfo: ArCompatibilityInfo(
+            isSupported: false,
+            availability: ArCoreAvailability.unsupportedDeviceNotCapable,
+            deviceModel: 'Xiaomi Redmi Note 13 4G (23129RA5FL)',
+            userMessage:
+                'Tu dispositivo (Xiaomi Redmi Note 13 4G) no cuenta con la certificación oficial de Google ARCore.',
+          ),
+          errorMessage:
               'Tu dispositivo (Xiaomi Redmi Note 13 4G) no cuenta con la certificación oficial de Google ARCore.',
-        ),
-        errorMessage:
-            'Tu dispositivo (Xiaomi Redmi Note 13 4G) no cuenta con la certificación oficial de Google ARCore.',
-      );
+        );
 
-      when(() => mockArCubit.state).thenReturn(errorState);
+        when(() => mockArCubit.state).thenReturn(errorState);
 
-      await tester.pumpWidget(buildTestWidget());
-      stateController.add(errorState);
-      await tester.pumpAndSettle();
+        await tester.pumpWidget(buildTestWidget());
+        stateController.add(errorState);
+        await tester.pumpAndSettle();
 
-      expect(find.text('Realidad Aumentada no disponible'), findsOneWidget);
-      expect(find.textContaining('no cuenta con la certificación oficial'), findsOneWidget);
-      expect(find.byKey(const Key('ar_unsupported_dismiss_button')), findsOneWidget);
+        expect(find.text('Realidad Aumentada no disponible'), findsOneWidget);
+        expect(
+          find.textContaining('no cuenta con la certificación oficial'),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('ar_unsupported_dismiss_button')),
+          findsOneWidget,
+        );
 
-      await stateController.close();
-    });
+        await stateController.close();
+      },
+    );
   });
 }

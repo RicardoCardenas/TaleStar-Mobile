@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../../../../core/constants/api_constants.dart';
+import '../../../library/presentation/widgets/ts_cached_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_typography.dart';
 import '../../../reader/domain/entities/story_page_detail.dart';
@@ -79,7 +81,9 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
       if (_textScrollController.hasClients) {
         _textScrollController.jumpTo(0.0);
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkScrollability());
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _checkScrollability(),
+      );
     }
   }
 
@@ -115,17 +119,24 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
     });
   }
 
-  String _resolveIllustrationAsset() {
+  Widget _buildIllustration() {
+    final assetId = widget.page?.illustrationAssetId;
+    if (assetId != null) {
+      return TsCachedImage(
+        imageUrl: ApiConstants.mediaAsset(Uri.encodeComponent(assetId)),
+        fit: BoxFit.cover,
+      );
+    }
     if (widget.page?.demoIllustrationAsset != null &&
         widget.page!.demoIllustrationAsset!.trim().isNotEmpty) {
-      return widget.page!.demoIllustrationAsset!.trim();
+      return Image.asset(
+        widget.page!.demoIllustrationAsset!.trim(),
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) =>
+            _buildThematicIllustration(),
+      );
     }
-    return switch (widget.pageNumber) {
-      1 => 'assets/demo/demo_forest.png',
-      2 => 'assets/demo/demo_castle.png',
-      3 => 'assets/demo/demo_space.png',
-      _ => 'assets/demo/demo_space.png',
-    };
+    return _buildThematicIllustration();
   }
 
   @override
@@ -146,7 +157,10 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
     // Ángulos de perspectiva resultantes: rotación de cámara física + ajuste manual
     final effectiveYaw = (widget.spatialYaw * 0.35) + widget.rotationY;
     final effectivePitch = (widget.spatialPitch * 0.25) + widget.rotationX;
-    final totalScale = (widget.scale * widget.spatialScaleMultiplier).clamp(0.55, 1.85);
+    final totalScale = (widget.scale * widget.spatialScaleMultiplier).clamp(
+      0.55,
+      1.85,
+    );
 
     return Center(
       child: Transform.translate(
@@ -166,10 +180,7 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: Colors.white,
-                width: 3.5,
-              ),
+              border: Border.all(color: Colors.white, width: 3.5),
               boxShadow: [
                 // Sombra de oclusión ambiental espacial de gran profundidad
                 BoxShadow(
@@ -214,13 +225,7 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
                       height: illustrationHeight,
                       width: double.infinity,
                       color: const Color(0xFFE9EBEF),
-                      child: Image.asset(
-                        _resolveIllustrationAsset(),
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return _buildThematicIllustration();
-                        },
-                      ),
+                      child: _buildIllustration(),
                     ),
                   ),
                 ),
@@ -254,7 +259,8 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
                                 fontWeight: FontWeight.w400,
                                 fontSize: 13.5,
                                 height: 1.48,
-                                fontStyle: FontStyle.normal, // No cursiva forzada
+                                fontStyle:
+                                    FontStyle.normal, // No cursiva forzada
                                 letterSpacing: 0.1,
                               ),
                             ),
@@ -308,10 +314,7 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Color(0xFF9B88FD),
-            Color(0xFF6B53FD),
-          ],
+          colors: [Color(0xFF9B88FD), Color(0xFF6B53FD)],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
         ),
@@ -336,10 +339,9 @@ class _ArStoryCard3dState extends State<ArStoryCard3d> {
             const SizedBox(height: 8),
             Text(
               'Tale Star AR',
-              style: AppTypography.caption(color: Colors.white).copyWith(
-                fontWeight: FontWeight.bold,
-                fontSize: 11.5,
-              ),
+              style: AppTypography.caption(
+                color: Colors.white,
+              ).copyWith(fontWeight: FontWeight.bold, fontSize: 11.5),
             ),
           ],
         ),

@@ -3,6 +3,8 @@ package com.startale.startale_mobile
 import android.content.Context
 import android.hardware.display.DisplayManager
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
@@ -13,7 +15,7 @@ import com.google.ar.core.Session
  * de la vista con la sesión de Google ARCore conforme a la especificación de referencia.
  */
 class DisplayRotationHelper(private val context: Context) : DisplayManager.DisplayListener {
-    private var viewportChanged = false
+    @Volatile private var viewportChanged = false
     private var viewportWidth = 0
     private var viewportHeight = 0
     private val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -30,7 +32,7 @@ class DisplayRotationHelper(private val context: Context) : DisplayManager.Displ
         }
 
     fun onResume() {
-        displayManager.registerDisplayListener(this, null)
+        displayManager.registerDisplayListener(this, Handler(Looper.getMainLooper()))
     }
 
     fun onPause() {

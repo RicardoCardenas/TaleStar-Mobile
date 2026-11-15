@@ -1,174 +1,294 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../../../../core/theme/app_colors.dart';
-import '../../../../core/theme/app_radii.dart';
-import '../../../../core/theme/app_spacing.dart';
-import '../../../../core/theme/app_typography.dart';
+import '../../data/services/ar_scene_controller.dart';
 import '../cubit/ar_cubit.dart';
 import '../cubit/ar_state.dart';
+import '../widgets/ar_camera_feed_view.dart';
 import '../widgets/ar_floating_controls.dart';
 import '../widgets/ar_story_card_3d.dart';
 import '../widgets/ar_top_bar.dart';
 
-/// Visor inmersivo del cuento colocado en el entorno real mediante Realidad Aumentada (Fase 5).
-///
-/// Refinado con base en la referencia visual "Mobile AR Story Reader":
-/// - El cuento se visualiza como una tarjeta/libro 3D ligero colocado en el espacio.
-/// - La cámara real permanece visible y dominante en todo el entorno.
-/// - La barra superior y los controles flotantes poseen prioridad de interacción absoluta
-///   (z-order frontal), solucionando definitivamente la respuesta del botón de cierre (X).
-class ArStoryViewerScreen extends StatelessWidget {
+/// Flutter draws controls only; the native GL scene renders the anchored story.
+class ArStoryViewerScreen extends StatefulWidget {
   final String storyId;
   final VoidCallback onExit;
-
+  @visibleForTesting
+  final bool? useNativeScene;
+  final ArSceneController? sceneController;
   const ArStoryViewerScreen({
     super.key,
     required this.storyId,
     required this.onExit,
+    this.useNativeScene,
+    this.sceneController,
   });
+  @override
+  State<ArStoryViewerScreen> createState() => _ArStoryViewerScreenState();
+}
+
+class _ArStoryViewerScreenState extends State<ArStoryViewerScreen> {
+  late final ArSceneController _scene;
+  bool _preview = false;
+  bool _physics = true;
+  bool _rotate = false;
+  bool _loading = true;
+  String? _error;
+  String? _loadedPage;
+  bool _initialized = false;
+  double _scale = 1;
+  double _arScale = 1;
+  double _baseScale = 1;
+  double _lastTwist = 0;
+  Offset _lastFocal = Offset.zero;
+  bool get _native => widget.useNativeScene ?? ArCameraFeedView.usesNativeScene;
+
+  @override
+  void initState() {
+    super.initState();
+    _scene = widget.sceneController ?? ArSceneController();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initialized) {
+      _initialized = true;
+      _preview = context.read<ArCubit>().state.placedPlaneId == 'preview';
+      _rotate = _preview;
+      if (_native && _preview) _send('preview', {'enabled': true});
+    }
+  }
+
+  void _send(String command, [Map<String, Object> values = const {}]) {
+    if (!_native) return;
+    unawaited(
+      _scene.command(command, values).catchError((Object e) {
+        if (mounted) {
+          setState(
+            () => _error =
+                'No se pudo actualizar el cuento. Intenta recolocarlo.',
+          );
+        }
+      }),
+    );
+  }
+
+  Future<void> _loadPage(ArState state) async {
+    final key = '${state.currentPage?.id}:${state.currentPageIndex}';
+    if (!_native || _loadedPage == key) return;
+    _loadedPage = key;
+    try {
+      await _scene.setPage(
+        state.currentPage,
+        state.currentPageIndex + 1,
+        state.pages.length,
+      );
+      if (mounted && _loadedPage == key) {
+        setState(() {
+          _loading = false;
+          _error = null;
+        });
+      }
+    } catch (_) {
+      if (mounted && _loadedPage == key) {
+        setState(() {
+          _loading = false;
+          _error = 'No se pudo cargar esta página en 3D.';
+        });
+      }
+    }
+  }
+
+  void _togglePreview() {
+    if (_preview && context.read<ArCubit>().state.placedPlaneId == 'preview') {
+      unawaited(_reposition());
+      return;
+    }
+    setState(() {
+      if (!_preview) _arScale = _scale;
+      _preview = !_preview;
+      _scale = _preview ? 1 : _arScale;
+      _rotate = _preview;
+    });
+    _send('preview', {'enabled': _preview});
+  }
+
+  Future<void> _reposition() async {
+    if (_native) {
+      try {
+        await _scene.command('clear');
+      } catch (_) {
+        return;
+      }
+    }
+    if (mounted) context.read<ArCubit>().repositionStory();
+  }
+
+  void _gestureStart(ScaleStartDetails details, Size size) {
+    _baseScale = _scale;
+    _lastTwist = 0;
+    _lastFocal = details.localFocalPoint;
+    _send('begin', {
+      'x': details.localFocalPoint.dx / size.width,
+      'y': details.localFocalPoint.dy / size.height,
+    });
+  }
+
+  void _gestureUpdate(ScaleUpdateDetails details, Size size) {
+    final delta = details.localFocalPoint - _lastFocal;
+    final twist = details.rotation - _lastTwist;
+    _lastFocal = details.localFocalPoint;
+    _lastTwist = details.rotation;
+    _scale = (_baseScale * details.scale).clamp(0.5, 2.0);
+    _send('transform', {
+      'scale': _scale,
+      'yaw': _rotate ? delta.dx * 0.012 + twist : twist,
+      'tilt': _rotate ? delta.dy * 0.012 : 0.0,
+      'move': !_rotate && details.pointerCount == 1,
+      'x': details.localFocalPoint.dx / size.width,
+      'y': details.localFocalPoint.dy / size.height,
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return BlocBuilder<ArCubit, ArState>(
       builder: (context, state) {
         final cubit = context.read<ArCubit>();
-        final currentPage = state.currentPage;
-        final totalPages = state.pages.length;
-        final pageNum = state.currentPageIndex + 1;
-
-        // Cálculo de proyección reactiva de anclaje físico AR
-        final screenSize = MediaQuery.of(context).size;
-        final hasAnchor = state.isAnchorTracking &&
-            state.anchorNormX > 0 &&
-            state.anchorNormY > 0;
-
-        // Proyección exacta: posición normalizada (0.0 a 1.0) mapeada al tamaño de pantalla lógico
-        final anchorLogicalX = state.anchorNormX * screenSize.width;
-        final anchorLogicalY = state.anchorNormY * screenSize.height;
-
-        final offsetX = hasAnchor
-            ? (anchorLogicalX - (screenSize.width / 2))
-                .clamp(-screenSize.width * 0.45, screenSize.width * 0.45)
-            : 0.0;
-        final offsetY = hasAnchor
-            ? (anchorLogicalY - (screenSize.height / 2))
-                .clamp(-screenSize.height * 0.38, screenSize.height * 0.38)
-            : 0.0;
-
-        // Escala en función de la distancia física real al objeto colocado (distancia de referencia: 0.85m)
-        final distanceScale = hasAnchor && state.anchorDistance > 0.15
-            ? (0.85 / state.anchorDistance).clamp(0.55, 1.85)
-            : 1.0;
-
+        unawaited(_loadPage(state));
+        final size = MediaQuery.sizeOf(context);
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: Stack(
             children: [
-              // ---------------------------------------------------------------
-              // CAPA 1: Tarjeta 3D del cuento anclada en el espacio de la cámara
-              // ---------------------------------------------------------------
-              Positioned.fill(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 75, bottom: 120),
-                  child: ArStoryCard3d(
-                    page: currentPage,
-                    pageNumber: pageNum,
-                    totalPages: totalPages,
-                    scale: state.cardScale,
-                    rotationY: state.cardRotationY,
-                    rotationX: state.cardRotationX,
-                    spatialOffsetX: offsetX,
-                    spatialOffsetY: offsetY,
-                    spatialScaleMultiplier: distanceScale,
-                    spatialYaw: state.anchorYaw,
-                    spatialPitch: state.anchorPitch,
-                    isAnchorTracking: state.isAnchorTracking,
-                    isAnchorInView: state.isAnchorInView,
-                    onScaleChanged: (scale) => cubit.setCardScale(scale),
-                    onRotationChanged: (rotY, rotX) =>
-                        cubit.setCardRotation(rotationY: rotY, rotationX: rotX),
-                    onResetTransform: () => cubit.resetCardTransform(),
+              if (_native)
+                Positioned.fill(
+                  child: GestureDetector(
+                    key: const Key('ar_world_gestures'),
+                    behavior: HitTestBehavior.opaque,
+                    onScaleStart: (d) => _gestureStart(d, size),
+                    onScaleUpdate: (d) => _gestureUpdate(d, size),
+                    onScaleEnd: (_) => _send('end'),
+                    onDoubleTap: () => _send('stand'),
+                    child: const SizedBox.expand(),
                   ),
-                ),
-              ),
-
-              // ---------------------------------------------------------------
-              // CAPA 2: Degradados de legibilidad superiores e inferiores (no táctiles)
-              // ---------------------------------------------------------------
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: 100,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.5),
-                          Colors.transparent,
-                        ],
-                      ),
+                )
+              else
+                Positioned.fill(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 100, bottom: 140),
+                    child: ArStoryCard3d(
+                      page: state.currentPage,
+                      pageNumber: state.currentPageIndex + 1,
+                      totalPages: state.pages.length,
+                      scale: state.cardScale,
+                      rotationY: state.cardRotationY,
+                      rotationX: state.cardRotationX,
+                      onScaleChanged: cubit.setCardScale,
+                      onRotationChanged: (y, x) =>
+                          cubit.setCardRotation(rotationY: y, rotationX: x),
+                      onResetTransform: cubit.resetCardTransform,
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                height: 140,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.bottomCenter,
-                        end: Alignment.topCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.65),
-                          Colors.transparent,
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-              // ---------------------------------------------------------------
-              // CAPA 3: Controles flotantes inferiores (<  3/6  > y Salir de AR)
-              // ---------------------------------------------------------------
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: ArFloatingControls(
-                  currentPage: pageNum,
-                  totalPages: totalPages,
-                  hasPrevious: state.hasPreviousPage,
-                  hasNext: state.hasNextPage,
-                  onPrevious: state.hasPreviousPage ? () => cubit.previousPage() : null,
-                  onNext: state.hasNextPage ? () => cubit.nextPage() : null,
-                  onExit: onExit,
-                ),
-              ),
-
-              // ---------------------------------------------------------------
-              // CAPA 4 (SUPERIOR): Barra superior flotante con botón (X) y menú (...)
-              // Ubicada intencionalmente en la cima del Stack para asegurar hit-testing inmediato.
-              // ---------------------------------------------------------------
               Positioned(
                 top: 0,
                 left: 0,
                 right: 0,
                 child: ArTopBar(
                   exitButtonKey: const Key('ar_viewer_exit_button'),
-                  onExit: onExit,
-                  title: state.story?.title ?? 'AR Story',
-                  subtitle: 'Página $pageNum de $totalPages',
-                  onOptions: () => _showOptionsBottomSheet(context, cubit),
+                  onExit: widget.onExit,
+                  title: state.story?.title ?? 'Cuento',
+                  subtitle:
+                      'Página ${state.currentPageIndex + 1} de ${state.pages.length}',
+                  onOptions: () => _options(context),
                   showOptions: true,
+                ),
+              ),
+              if (_native)
+                Positioned(
+                  top: MediaQuery.paddingOf(context).top + 86,
+                  left: 12,
+                  right: 12,
+                  child: Column(
+                    children: [
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          _button(
+                            'ar_move_rotate',
+                            _rotate ? 'Girar' : 'Mover',
+                            _rotate ? Icons.rotate_right : Icons.open_with,
+                            _preview
+                                ? null
+                                : () => setState(() => _rotate = !_rotate),
+                          ),
+                          _button(
+                            'ar_physics_toggle',
+                            _preview
+                                ? 'Sin física'
+                                : (_physics ? 'Física: sí' : 'Física: no'),
+                            Icons.grain,
+                            _preview
+                                ? null
+                                : () {
+                                    setState(() => _physics = !_physics);
+                                    _send('physics', {'enabled': _physics});
+                                  },
+                          ),
+                          _button(
+                            'ar_stand_up',
+                            'Levantar',
+                            Icons.vertical_align_top,
+                            () => _send('stand'),
+                          ),
+                          _button(
+                            'ar_preview_toggle',
+                            _preview ? 'Volver a AR' : 'Vista 3D',
+                            _preview
+                                ? Icons.view_in_ar
+                                : Icons.view_in_ar_outlined,
+                            _togglePreview,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 7),
+                      _caption(
+                        _error ??
+                            (_loading
+                                ? 'Cargando página…'
+                                : !_preview && !state.isAnchorTracking
+                                ? 'Buscando la mesa de nuevo. Mueve el teléfono despacio.'
+                                : !_preview &&
+                                      const [
+                                        'MANUAL_ESTIMATE',
+                                        'INSTANT_PLACEMENT',
+                                        'PLANE_EXTENT',
+                                        'ORIENTED_POINT',
+                                      ].contains(state.placementPointType)
+                                ? 'Apoyo estimado · ${_rotate ? 'Arrastra para girar e inclinar' : 'Arrastra para mover'}'
+                                : _rotate
+                                ? 'Arrastra para girar e inclinar · Pellizca para cambiar tamaño'
+                                : 'Arrastra para mover sobre la mesa · Dos dedos para tamaño y giro'),
+                      ),
+                    ],
+                  ),
+                ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: ArFloatingControls(
+                  currentPage: state.currentPageIndex + 1,
+                  totalPages: state.pages.length,
+                  hasPrevious: state.hasPreviousPage,
+                  hasNext: state.hasNextPage,
+                  onPrevious: state.hasPreviousPage ? cubit.previousPage : null,
+                  onNext: state.hasNextPage ? cubit.nextPage : null,
+                  onExit: widget.onExit,
                 ),
               ),
             ],
@@ -178,116 +298,73 @@ class ArStoryViewerScreen extends StatelessWidget {
     );
   }
 
-  /// Menú modal de opciones espaciales AR (Recolocar, Ajustar Escala, Restablecer)
-  void _showOptionsBottomSheet(BuildContext context, ArCubit cubit) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (bottomSheetContext) {
-        return Container(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          decoration: BoxDecoration(
-            color: const Color(0xFF181724),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            border: Border.all(color: Colors.white12, width: 1),
-          ),
-          child: SafeArea(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: AppRadii.pill,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  'Opciones del Cuento AR',
-                  style: AppTypography.titleMedium(color: Colors.white),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Ajusta la posición y escala del cuento en tu entorno físico.',
-                  style: AppTypography.caption(color: Colors.white70),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-
-                // 1. Recolocar Cuento
-                ListTile(
-                  key: const Key('ar_options_reposition_tile'),
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary900.withValues(alpha: 0.25),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.place_rounded,
-                      color: AppColors.primary300,
-                      size: 22,
-                    ),
-                  ),
-                  title: Text(
-                    'Recolocar cuento en otra superficie',
-                    style: AppTypography.bodyMedium(color: Colors.white),
-                  ),
-                  subtitle: Text(
-                    'Vuelve a escanear para elegir una nueva mesa o suelo',
-                    style: AppTypography.caption(color: Colors.white54),
-                  ),
-                  onTap: () {
-                    Navigator.of(bottomSheetContext).pop();
-                    cubit.repositionStory();
-                  },
-                ),
-
-                const Divider(color: Colors.white10),
-
-                // 2. Restablecer Escala y Rotación
-                ListTile(
-                  key: const Key('ar_options_reset_tile'),
-                  contentPadding: EdgeInsets.zero,
-                  leading: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.restore_rounded,
-                      color: Colors.white70,
-                      size: 22,
-                    ),
-                  ),
-                  title: Text(
-                    'Restablecer tamaño y orientación',
-                    style: AppTypography.bodyMedium(color: Colors.white),
-                  ),
-                  subtitle: Text(
-                    'Regresa el panel al tamaño y perspectiva iniciales',
-                    style: AppTypography.caption(color: Colors.white54),
-                  ),
-                  onTap: () {
-                    Navigator.of(bottomSheetContext).pop();
-                    cubit.resetCardTransform();
-                  },
-                ),
-
-                const SizedBox(height: AppSpacing.md),
-              ],
+  Widget _button(
+    String key,
+    String label,
+    IconData icon,
+    VoidCallback? onPressed,
+  ) => FilledButton.tonalIcon(
+    key: Key(key),
+    onPressed: onPressed,
+    style: FilledButton.styleFrom(
+      backgroundColor: const Color(0xDD211D31),
+      foregroundColor: Colors.white,
+      disabledBackgroundColor: const Color(0xDD211D31),
+      disabledForegroundColor: Colors.white54,
+      visualDensity: VisualDensity.compact,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    ),
+    icon: Icon(icon, size: 18),
+    label: Text(label, style: const TextStyle(fontSize: 12)),
+  );
+  Widget _caption(String text) => IgnorePointer(
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .7),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: Colors.white, fontSize: 12),
+      ),
+    ),
+  );
+  void _options(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: const Color(0xFF181724),
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            key: const Key('ar_options_reposition_tile'),
+            leading: const Icon(Icons.place, color: Colors.white),
+            title: const Text(
+              'Recolocar cuento en otra superficie',
+              style: TextStyle(color: Colors.white),
             ),
+            onTap: () {
+              Navigator.pop(ctx);
+              unawaited(_reposition());
+            },
           ),
-        );
-      },
-    );
-  }
+          ListTile(
+            key: const Key('ar_options_reset_tile'),
+            leading: const Icon(Icons.vertical_align_top, color: Colors.white),
+            title: const Text(
+              'Volver a poner de pie',
+              style: TextStyle(color: Colors.white),
+            ),
+            onTap: () {
+              Navigator.pop(ctx);
+              _send('stand');
+              if (!_native) context.read<ArCubit>().resetCardTransform();
+            },
+          ),
+        ],
+      ),
+    ),
+  );
 }

@@ -9,7 +9,9 @@ import '../../domain/repositories/ar_service.dart';
 
 /// Implementación real que se comunica con el subsistema nativo de Android y Google ARCore mediante MethodChannel.
 class ArNativeServiceImpl implements ArService {
-  static const MethodChannel _channel = MethodChannel('com.startale.startale_mobile/ar_core');
+  static const MethodChannel _channel = MethodChannel(
+    'com.startale.startale_mobile/ar_core',
+  );
 
   final StreamController<List<ArPlane>> _planesController =
       StreamController<List<ArPlane>>.broadcast();
@@ -50,17 +52,19 @@ class ArNativeServiceImpl implements ArService {
         for (final item in rawList) {
           if (item is Map) {
             final map = Map<String, dynamic>.from(item);
-            planes.add(ArPlane(
-              id: map['id']?.toString() ?? 'plane',
-              type: map['type'] == 'horizontalDownward'
-                  ? ArPlaneType.horizontalDownward
-                  : ArPlaneType.horizontalUpward,
-              extentX: (map['extentX'] as num?)?.toDouble() ?? 1.0,
-              extentZ: (map['extentZ'] as num?)?.toDouble() ?? 1.0,
-              centerPoseX: (map['centerPoseX'] as num?)?.toDouble() ?? 0.0,
-              centerPoseY: (map['centerPoseY'] as num?)?.toDouble() ?? 0.0,
-              centerPoseZ: (map['centerPoseZ'] as num?)?.toDouble() ?? 0.0,
-            ));
+            planes.add(
+              ArPlane(
+                id: map['id']?.toString() ?? 'plane',
+                type: map['type'] == 'horizontalDownward'
+                    ? ArPlaneType.horizontalDownward
+                    : ArPlaneType.horizontalUpward,
+                extentX: (map['extentX'] as num?)?.toDouble() ?? 1.0,
+                extentZ: (map['extentZ'] as num?)?.toDouble() ?? 1.0,
+                centerPoseX: (map['centerPoseX'] as num?)?.toDouble() ?? 0.0,
+                centerPoseY: (map['centerPoseY'] as num?)?.toDouble() ?? 0.0,
+                centerPoseZ: (map['centerPoseZ'] as num?)?.toDouble() ?? 0.0,
+              ),
+            );
           }
         }
         _cachedPlanes = planes;
@@ -75,21 +79,28 @@ class ArNativeServiceImpl implements ArService {
         final map = Map<String, dynamic>.from(rawMap);
         final status = ArStatusUpdate(
           sessionState: map['sessionState']?.toString() ?? 'ACTIVE',
-          cameraTrackingState: map['cameraTrackingState']?.toString() ?? 'UNKNOWN',
-          trackingFailureReason: map['trackingFailureReason']?.toString() ?? 'NONE',
+          cameraTrackingState:
+              map['cameraTrackingState']?.toString() ?? 'UNKNOWN',
+          trackingFailureReason:
+              map['trackingFailureReason']?.toString() ?? 'NONE',
           frameTimestampNs: (map['frameTimestampNs'] as num?)?.toInt() ?? 0,
           eventsSentCount: (map['eventsSentCount'] as num?)?.toInt() ?? 0,
           eventsReceivedCount: _eventsReceivedCount,
           knownPlanesCount: (map['knownPlanesCount'] as num?)?.toInt() ?? 0,
           validPlanesCount: (map['validPlanesCount'] as num?)?.toInt() ?? 0,
-          nonHorizontalPlanesCount: (map['nonHorizontalPlanesCount'] as num?)?.toInt() ?? 0,
+          nonHorizontalPlanesCount:
+              (map['nonHorizontalPlanesCount'] as num?)?.toInt() ?? 0,
           pausedPlanesCount: (map['pausedPlanesCount'] as num?)?.toInt() ?? 0,
-          subsumedPlanesCount: (map['subsumedPlanesCount'] as num?)?.toInt() ?? 0,
-          planeDiscardReason: map['planeDiscardReason']?.toString() ?? 'ARCore buscando superficies...',
+          subsumedPlanesCount:
+              (map['subsumedPlanesCount'] as num?)?.toInt() ?? 0,
+          planeDiscardReason:
+              map['planeDiscardReason']?.toString() ??
+              'ARCore buscando superficies...',
           hasValidPlacementPoint: map['hasValidPlacementPoint'] == true,
           hasHitAtReticle: map['hasHitAtReticle'] == true,
           placementPointType: map['placementPointType']?.toString() ?? 'NONE',
-          hitDistanceMeters: (map['hitDistanceMeters'] as num?)?.toDouble() ?? 0.0,
+          hitDistanceMeters:
+              (map['hitDistanceMeters'] as num?)?.toDouble() ?? 0.0,
           anchorScreenX: (map['anchorScreenX'] as num?)?.toDouble() ?? 0.0,
           anchorScreenY: (map['anchorScreenY'] as num?)?.toDouble() ?? 0.0,
           anchorNormX: (map['anchorNormX'] as num?)?.toDouble() ?? 0.5,
@@ -117,7 +128,8 @@ class ArNativeServiceImpl implements ArService {
         isSupported: false,
         availability: ArCoreAvailability.unsupportedDeviceNotCapable,
         deviceModel: 'iOS / Plataforma no soportada para ARCore en MVP',
-        userMessage: 'La experiencia de Realidad Aumentada requiere Android con Google ARCore.',
+        userMessage:
+            'La experiencia de Realidad Aumentada requiere Android con Google ARCore.',
       );
     }
 
@@ -142,35 +154,44 @@ class ArNativeServiceImpl implements ArService {
       }
 
       // 2. Consultar disponibilidad con tolerancia a estados transitorios
-      String? result = await _channel.invokeMethod<String>('checkArAvailability');
+      String? result = await _channel.invokeMethod<String>(
+        'checkArAvailability',
+      );
       if (result == 'UNKNOWN_CHECKING') {
         await Future.delayed(const Duration(milliseconds: 300));
         result = await _channel.invokeMethod<String>('checkArAvailability');
       }
 
       final availability = ArCoreAvailability.fromNativeString(result);
-      final isSupported = availability == ArCoreAvailability.supportedInstalled ||
+      final isSupported =
+          availability == ArCoreAvailability.supportedInstalled ||
           availability == ArCoreAvailability.supportedNotInstalled;
 
       String message;
       switch (availability) {
         case ArCoreAvailability.supportedInstalled:
-          message = 'Dispositivo ($deviceModel) certificado y listo para Realidad Aumentada.';
+          message =
+              'Dispositivo ($deviceModel) certificado y listo para Realidad Aumentada.';
           break;
         case ArCoreAvailability.supportedNotInstalled:
-          message = 'Tu dispositivo ($deviceModel) es compatible, pero necesitas instalar Servicios de Google Play para RA.';
+          message =
+              'Tu dispositivo ($deviceModel) es compatible, pero necesitas instalar Servicios de Google Play para RA.';
           break;
         case ArCoreAvailability.supportedApkTooOld:
-          message = 'Actualiza Servicios de Google Play para RA en tu dispositivo ($deviceModel).';
+          message =
+              'Actualiza Servicios de Google Play para RA en tu dispositivo ($deviceModel).';
           break;
         case ArCoreAvailability.unsupportedDeviceNotCapable:
-          message = 'Tu dispositivo ($deviceModel) no cuenta con la certificación oficial de Google ARCore para rastreo de superficies.';
+          message =
+              'Tu dispositivo ($deviceModel) no cuenta con la certificación oficial de Google ARCore para rastreo de superficies.';
           break;
         case ArCoreAvailability.unknownChecking:
-          message = 'Comprobando compatibilidad de Realidad Aumentada con Google...';
+          message =
+              'Comprobando compatibilidad de Realidad Aumentada con Google...';
           break;
         case ArCoreAvailability.unknownError:
-          message = 'No fue posible determinar la compatibilidad de Realidad Aumentada en $deviceModel.';
+          message =
+              'No fue posible determinar la compatibilidad de Realidad Aumentada en $deviceModel.';
           break;
       }
 
@@ -193,7 +214,9 @@ class ArNativeServiceImpl implements ArService {
   @override
   Future<bool> hasCameraPermission() async {
     try {
-      final bool? nativePerm = await _channel.invokeMethod<bool>('hasCameraPermission');
+      final bool? nativePerm = await _channel.invokeMethod<bool>(
+        'hasCameraPermission',
+      );
       if (nativePerm != null) return nativePerm;
     } catch (_) {}
     final status = await Permission.camera.status;
@@ -220,7 +243,9 @@ class ArNativeServiceImpl implements ArService {
     if (!hasPerm) {
       final granted = await requestCameraPermission();
       if (!granted) {
-        throw StateError('Permiso de cámara no concedido para Realidad Aumentada.');
+        throw StateError(
+          'Permiso de cámara no concedido para Realidad Aumentada.',
+        );
       }
     }
 
@@ -265,6 +290,15 @@ class ArNativeServiceImpl implements ArService {
     try {
       await _channel.invokeMethod('stopSession');
     } catch (_) {}
+  }
+
+  @override
+  Future<bool> placeEstimatedStory(double distance) async {
+    if (!_isSessionActive) return false;
+    return await _channel.invokeMethod<bool>('placeEstimatedStory', {
+          'distance': distance,
+        }) ??
+        false;
   }
 
   @override

@@ -55,6 +55,13 @@ class _ArReticleState extends State<ArReticle>
   @override
   Widget build(BuildContext context) {
     final isLocked = widget.hasHitAtReticle || widget.hasValidPlacement;
+    final estimated =
+        isLocked &&
+        !const [
+          'CONFIRMED_PLANE',
+          'DEPTH_SURFACE',
+          'INSTANT_FULL',
+        ].contains(widget.placementType);
 
     return Center(
       child: GestureDetector(
@@ -67,10 +74,10 @@ class _ArReticleState extends State<ArReticle>
             final pulse = math.sin(t * math.pi * 2) * 0.15 + 1.0;
 
             final activeColor = isLocked
-                ? const Color(0xFF00E676) // Verde esmeralda neón
+                ? (estimated ? AppColors.warning : const Color(0xFF00E676))
                 : (widget.isTracking
-                    ? AppColors.primary300
-                    : AppColors.warning);
+                      ? AppColors.primary300
+                      : AppColors.warning);
 
             return Column(
               mainAxisSize: MainAxisSize.min,
@@ -116,7 +123,9 @@ class _ArReticleState extends State<ArReticle>
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: activeColor.withValues(alpha: isLocked ? 0.9 : 0.6),
+                            color: activeColor.withValues(
+                              alpha: isLocked ? 0.9 : 0.6,
+                            ),
                             width: isLocked ? 2.5 : 1.5,
                           ),
                         ),
@@ -132,10 +141,7 @@ class _ArReticleState extends State<ArReticle>
                         color: isLocked
                             ? activeColor.withValues(alpha: 0.25)
                             : Colors.black.withValues(alpha: 0.5),
-                        border: Border.all(
-                          color: activeColor,
-                          width: 2.0,
-                        ),
+                        border: Border.all(color: activeColor, width: 2.0),
                         boxShadow: [
                           BoxShadow(
                             color: activeColor.withValues(alpha: 0.4),
@@ -160,7 +166,10 @@ class _ArReticleState extends State<ArReticle>
 
                 // Pastilla indicadora inferior
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.65),
                     borderRadius: AppRadii.pill,
@@ -190,14 +199,15 @@ class _ArReticleState extends State<ArReticle>
                       const SizedBox(width: 6),
                       Text(
                         isLocked
-                            ? 'Superficie lista · Toca para colocar'
+                            ? (estimated
+                                  ? 'Apoyo estimado · Toca para colocar'
+                                  : 'Superficie lista · Toca para colocar')
                             : (widget.isTracking
-                                ? 'Buscando mesa o suelo...'
-                                : 'Mueve el teléfono suavemente'),
-                        style: AppTypography.caption(color: Colors.white).copyWith(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 11.5,
-                        ),
+                                  ? 'Buscando mesa o suelo...'
+                                  : 'Mueve el teléfono suavemente'),
+                        style: AppTypography.caption(
+                          color: Colors.white,
+                        ).copyWith(fontWeight: FontWeight.w600, fontSize: 11.5),
                       ),
                     ],
                   ),

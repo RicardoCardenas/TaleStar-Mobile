@@ -2,10 +2,7 @@ import 'package:equatable/equatable.dart';
 
 /// Entidad pura del dominio que representa una Página individual de un Cuento (StoryPage).
 ///
-/// Nota arquitectónica sobre el Bloqueo StoryPage–Ilustración:
-/// El backend oficial en su esquema `StoryPageResponse` no expone una URL o ID de asset de imagen.
-/// El campo opcional [demoIllustrationAsset] se provee exclusivamente para la experiencia
-/// enriquecida del Modo Demostración sin inventar campos en el contrato del backend.
+/// El backend vincula la ilustración generada mediante `visual_config.asset_id`.
 class StoryPageDetail extends Equatable {
   final String id;
   final String storyId;
@@ -18,6 +15,11 @@ class StoryPageDetail extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
   final String? demoIllustrationAsset;
+
+  String? get illustrationAssetId {
+    final value = visualConfig['asset_id'];
+    return value is String && value.trim().isNotEmpty ? value.trim() : null;
+  }
 
   const StoryPageDetail({
     required this.id,
@@ -57,23 +59,23 @@ class StoryPageDetail extends Equatable {
       seed: seed ?? this.seed,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
-      demoIllustrationAsset: demoIllustrationAsset ?? this.demoIllustrationAsset,
+      demoIllustrationAsset:
+          demoIllustrationAsset ?? this.demoIllustrationAsset,
     );
   }
 
   @override
   List<Object?> get props => [
-        id,
-        storyId,
-        pageNumber,
-        action,
-        text,
-        visualConfig,
-        characterIds,
-        seed,
-        createdAt,
-        updatedAt,
-        demoIllustrationAsset,
-      ];
+    id,
+    storyId,
+    pageNumber,
+    action,
+    text,
+    visualConfig,
+    characterIds,
+    seed,
+    createdAt,
+    updatedAt,
+    demoIllustrationAsset,
+  ];
 }
-

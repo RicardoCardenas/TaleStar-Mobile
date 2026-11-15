@@ -83,7 +83,8 @@ class AppConfig {
     bool? overrideUseMockAr,
   }) async {
     final envName = const String.fromEnvironment('APP_ENV', defaultValue: '');
-    final env = targetEnvironment ??
+    final env =
+        targetEnvironment ??
         (envName.isNotEmpty
             ? AppEnvironment.fromString(envName)
             : AppEnvironment.development);
@@ -101,13 +102,19 @@ class AppConfig {
       AppEnvironment.development => 'http://10.0.2.2:8000',
     };
 
-    final apiBaseUrl = dotenv.maybeGet('API_BASE_URL') ?? defaultUrl;
-    final enableDebugLogs = dotenv.maybeGet('ENABLE_DEBUG_LOGS')?.toLowerCase() == 'true' ||
+    const compiledApiUrl = String.fromEnvironment('API_BASE_URL');
+    final apiBaseUrl = compiledApiUrl.trim().isNotEmpty
+        ? compiledApiUrl.trim()
+        : dotenv.maybeGet('API_BASE_URL') ?? defaultUrl;
+    final enableDebugLogs =
+        dotenv.maybeGet('ENABLE_DEBUG_LOGS')?.toLowerCase() == 'true' ||
         (env != AppEnvironment.production);
 
-    final mockFlag = overrideUseMockData ??
+    final mockFlag =
+        overrideUseMockData ??
         const bool.fromEnvironment('USE_MOCK_DATA', defaultValue: false);
-    final mockArFlag = overrideUseMockAr ??
+    final mockArFlag =
+        overrideUseMockAr ??
         const bool.fromEnvironment('USE_MOCK_AR', defaultValue: false);
 
     // Regla de seguridad crítica: Mock Mode está estrictamente restringido al ambiente de desarrollo.

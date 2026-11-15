@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../../../core/constants/api_constants.dart';
+import '../../../library/presentation/widgets/ts_cached_image.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_radii.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -8,12 +10,8 @@ import '../../domain/entities/story_page_detail.dart';
 
 /// Marco visual reutilizable para presentar la ilustración de una página del cuento.
 ///
-/// Mitigación del Bloqueo StoryPage–Ilustración:
-/// El backend oficial actualmente no posee una relación confirmada entre `StoryPage`
-/// y su asset de `Generative Media`. Cuando no existe una imagen asociada (o en producción),
-/// este componente presenta un marco temático oficial de Tale Star con bordes redondeados,
-/// reservando el espacio visual de la ilustración y asegurando que el texto narrativo
-/// permanezca 100% legible y accesible.
+/// Recupera la ilustración asociada a `visual_config.asset_id` con autenticación.
+/// Si no hay imagen asociada, conserva el espacio visual con un marco temático.
 class StoryIllustrationFrame extends StatelessWidget {
   final StoryPageDetail page;
   final StoryDetail story;
@@ -28,6 +26,15 @@ class StoryIllustrationFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final assetId = page.illustrationAssetId;
+    if (assetId != null) {
+      return TsCachedImage(
+        imageUrl: ApiConstants.mediaAsset(Uri.encodeComponent(assetId)),
+        height: height,
+        width: double.infinity,
+        borderRadius: AppRadii.lg,
+      );
+    }
     final assetPath = page.demoIllustrationAsset;
 
     // Si disponemos de un asset local (usado en Modo Demostración), lo mostramos
@@ -54,7 +61,8 @@ class StoryIllustrationFrame extends StatelessWidget {
               Image.asset(
                 assetPath,
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => _buildThematicPlaceholder(),
+                errorBuilder: (context, error, stackTrace) =>
+                    _buildThematicPlaceholder(),
               ),
               // Sutil viñeta degradada inferior para legibilidad del badge de página
               Positioned(
@@ -62,7 +70,10 @@ class StoryIllustrationFrame extends StatelessWidget {
                 left: 0,
                 right: 0,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.bottomCenter,
@@ -152,7 +163,9 @@ class StoryIllustrationFrame extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
                 child: Text(
                   'El cuento acompaña tu lectura mientras se vinculan los trazos visuales.',
-                  style: AppTypography.caption(color: AppColors.textSecondaryLight),
+                  style: AppTypography.caption(
+                    color: AppColors.textSecondaryLight,
+                  ),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -172,8 +185,9 @@ class StoryIllustrationFrame extends StatelessWidget {
               ),
               child: Text(
                 'Página ${page.pageNumber}',
-                style: AppTypography.caption(color: AppColors.primary900)
-                    .copyWith(fontWeight: FontWeight.bold),
+                style: AppTypography.caption(
+                  color: AppColors.primary900,
+                ).copyWith(fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -182,4 +196,3 @@ class StoryIllustrationFrame extends StatelessWidget {
     );
   }
 }
-

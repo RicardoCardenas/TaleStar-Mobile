@@ -2,518 +2,332 @@ package com.startale.startale_mobile
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.opengl.GLES20
 import android.opengl.GLSurfaceView
 import android.opengl.Matrix
 import android.view.View
-import com.google.ar.core.Anchor
-import com.google.ar.core.Camera
-import com.google.ar.core.Config
-import com.google.ar.core.Frame
-import com.google.ar.core.HitResult
-import com.google.ar.core.InstantPlacementPoint
-import com.google.ar.core.Plane
-import com.google.ar.core.Session
-import com.google.ar.core.TrackingFailureReason
-import com.google.ar.core.TrackingState
+import com.google.ar.core.*
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.platform.PlatformView
+import java.util.concurrent.Executors
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.*
 
-/**
- * PlatformView nativo de Android que aloja una GLSurfaceView con sesión real de ARCore.
- * Renderiza el feed de cámara mediante [BackgroundRenderer] con Display Geometry sincronizado
- * a través de [DisplayRotationHelper], rastrea superficies planas horizontales e implementa
- * hit-testing continuo en tiempo real con soporte completo para Instant Placement y anclaje 3D.
- */
+/** ARCore and the story share one GL scene. No screen-space story overlay is used. */
 class ArCorePlatformView(
     private val context: Context,
     private val activity: Activity,
-    private val id: Int,
+    id: Int,
     creationParams: Map<String?, Any?>?,
-    private val messenger: BinaryMessenger,
+    messenger: BinaryMessenger,
     private val channel: MethodChannel,
     private val onDisposed: ((ArCorePlatformView) -> Unit)? = null
 ) : PlatformView, GLSurfaceView.Renderer {
-
-    private val glSurfaceView: GLSurfaceView = GLSurfaceView(context)
-    private val backgroundRenderer = BackgroundRenderer()
-    private val displayRotationHelper = DisplayRotationHelper(activity)
+    private val glSurfaceView = GLSurfaceView(context)
+    private val background = BackgroundRenderer()
+    private val storyRenderer = StorySceneRenderer()
+    private val rotation = DisplayRotationHelper(activity)
+    private val pageExecutor = Executors.newSingleThreadExecutor()
+    @Volatile private var disposed = false
+    @Volatile private var pageVersion = 0
     private var session: Session? = null
-    private var isSessionConfigured = false
-    private var currentAnchor: Anchor? = null
-    private var lastPlanesEmitTime = 0L
-    private var eventsSentCount = 0L
-
-    var viewportWidth: Int = 1080
-        private set
-    var viewportHeight: Int = 2400
-        private set
-
-    private var latestHitResult: HitResult? = null
-    private var latestFrame: Frame? = null
-
+    private var configured = false
+    private var frame: Frame? = null
+    private var anchor: Anchor? = null
+    private var table: Plane? = null
+    private var placementType = "NONE"
+    private var instantPoint: InstantPlacementPoint? = null
+    private var approximateDistance = 0.75f
+    private var placed = false
+    private var preview = false
+    private var dynamics = StoryDynamics()
+    private val previewDynamics = StoryDynamics().apply { physics = false }
+    private var offsetX = 0f
+    private var offsetZ = 0f
+    private var grabOffset = floatArrayOf(0f,0f)
+    private var lastTime = 0L
+    private var lastEmit = 0L
+    private var events = 0
+    private var width = 1080
+    private var height = 2400
     private val viewMatrix = FloatArray(16)
-    private val projMatrix = FloatArray(16)
-    private val vpMatrix = FloatArray(16)
+    private val projection = FloatArray(16)
+    private val vp = FloatArray(16)
+    private val anchorMatrix = FloatArray(16)
 
     init {
         glSurfaceView.preserveEGLContextOnPause = true
         glSurfaceView.setEGLContextClientVersion(2)
-        glSurfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0)
+        glSurfaceView.setEGLConfigChooser(8,8,8,8,16,0)
         glSurfaceView.setRenderer(this)
-        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
     }
-
-    override fun getView(): View {
-        return glSurfaceView
-    }
+    override fun getView(): View = glSurfaceView
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        GLES20.glClearColor(0.1f, 0.1f, 0.1f, 1.0f)
-        backgroundRenderer.createOnGlThread()
-
+        background.createOnGlThread()
+        storyRenderer.create()
         try {
             if (session == null) {
-                session = Session(activity)
-                val arConfig = Config(session)
-
-                // 1. Detección completa de planos horizontales y verticales para enriquecer el mapa SLAM
-                arConfig.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
-
-                // 2. Enfoque automático continuo para nitidez en superficies cercanas (mesas, suelos)
-                try {
-                    arConfig.focusMode = Config.FocusMode.AUTO
-                } catch (e: Exception) {
-                    // Fallback transparente si el hardware no soporta FocusMode.AUTO
-                }
-
-                // 3. Estimación de iluminación y modo de actualización inmediata
-                arConfig.lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
-                arConfig.updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
-
-                // 4. Habilitación de Instant Placement como acelerador de colocación inmediata
-                try {
-                    arConfig.instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
-                } catch (e: Exception) {
-                    // Fallback transparente si no está soportado en la versión de Play Services
-                }
-
-                session?.configure(arConfig)
-            }
-            session?.setCameraTextureName(backgroundRenderer.textureId)
-            displayRotationHelper.onResume()
-            session?.resume()
-            isSessionConfigured = true
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        viewportWidth = width
-        viewportHeight = height
-        displayRotationHelper.onSurfaceChanged(width, height)
-        GLES20.glViewport(0, 0, width, height)
-    }
-
-    override fun onDrawFrame(gl: GL10?) {
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-
-        val currentSession = session ?: return
-        if (!isSessionConfigured) return
-
-        // Sincroniza la rotación y dimensiones del viewport con ARCore antes de actualizar el frame
-        displayRotationHelper.updateSessionIfNeeded(currentSession)
-
-        try {
-            val frame: Frame = currentSession.update()
-            latestFrame = frame
-            val camera: Camera = frame.camera
-            val frameTimestamp = frame.timestamp
-
-            // Dibuja el feed de cámara real en orientación vertical corregida
-            backgroundRenderer.draw(frame)
-
-            val trackingState = camera.trackingState
-            val trackingFailureReason = if (trackingState != TrackingState.TRACKING) {
-                try {
-                    camera.trackingFailureReason.name
-                } catch (e: Exception) {
-                    "UNKNOWN"
-                }
-            } else {
-                "NONE"
-            }
-
-            // 1. Consulta y auditoría exhaustiva de planos rastreados por ARCore
-            val allPlanes = currentSession.getAllTrackables(Plane::class.java)
-            var subsumedCount = 0
-            var nonHorizontalCount = 0
-            var pausedCount = 0
-            val validPlanes = mutableListOf<Plane>()
-
-            for (plane in allPlanes) {
-                if (plane.subsumedBy != null) {
-                    subsumedCount++
-                    continue
-                }
-                if (plane.type != Plane.Type.HORIZONTAL_UPWARD_FACING) {
-                    nonHorizontalCount++
-                    continue
-                }
-                if (plane.trackingState != TrackingState.TRACKING) {
-                    pausedCount++
-                    continue
-                }
-                validPlanes.add(plane)
-            }
-
-            val planeDiscardReason = when {
-                allPlanes.isEmpty() -> "ARCore aún buscando superficies en el entorno"
-                validPlanes.isNotEmpty() -> "Ninguno ($validPlanes.size planos horizontales válidos)"
-                nonHorizontalCount > 0 && pausedCount == 0 -> "$nonHorizontalCount planos detectados son verticales (apunta al suelo/mesa)"
-                pausedCount > 0 -> "$pausedCount planos pausados temporalmente por movimiento"
-                subsumedCount > 0 -> "$subsumedCount planos fusionados/subsumidos"
-                else -> "Planos no cumplen criterios de orientación horizontal superior"
-            }
-
-            // 2. Hit-testing en tiempo real en el centro de la pantalla (retícula)
-            val centerX = viewportWidth / 2.0f
-            val centerY = viewportHeight / 2.0f
-
-            // A. Intentar raycast estándar contra planos detectados
-            val standardHits = try {
-                frame.hitTest(centerX, centerY)
-            } catch (e: Exception) {
-                emptyList<HitResult>()
-            }
-
-            var bestHit: HitResult? = null
-            var hitType = "NONE"
-            var hitDistance = 0.0
-
-            // Prioridad 1: Plano horizontal confirmado con la pose dentro del polígono delimitador
-            for (hit in standardHits) {
-                val trackable = hit.trackable
-                if (trackable is Plane &&
-                    trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
-                    trackable.trackingState == TrackingState.TRACKING &&
-                    trackable.isPoseInPolygon(hit.hitPose)
-                ) {
-                    bestHit = hit
-                    hitType = "CONFIRMED_PLANE"
-                    hitDistance = hit.distance.toDouble()
-                    break
-                }
-            }
-
-            // Prioridad 2: Plano horizontal dentro de los límites de extensión
-            if (bestHit == null) {
-                for (hit in standardHits) {
-                    val trackable = hit.trackable
-                    if (trackable is Plane &&
-                        trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
-                        trackable.trackingState == TrackingState.TRACKING &&
-                        trackable.isPoseInExtents(hit.hitPose)
-                    ) {
-                        bestHit = hit
-                        hitType = "PLANE_EXTENT"
-                        hitDistance = hit.distance.toDouble()
-                        break
-                    }
-                }
-            }
-
-            // Prioridad 3: HitTest con Instant Placement contra profundidad estimada / nube de puntos
-            if (bestHit == null) {
-                try {
-                    val instantHits = frame.hitTestInstantPlacement(centerX, centerY, 1.5f)
-                    for (hit in instantHits) {
-                        val trackable = hit.trackable
-                        if (trackable is InstantPlacementPoint &&
-                            trackable.trackingState == TrackingState.TRACKING
-                        ) {
-                            bestHit = hit
-                            hitType = "INSTANT_PLACEMENT"
-                            hitDistance = hit.distance.toDouble()
-                            break
+                session = Session(activity).also { ar ->
+                    ar.configure(Config(ar).apply {
+                        planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
+                        focusMode = Config.FocusMode.AUTO
+                        lightEstimationMode = Config.LightEstimationMode.AMBIENT_INTENSITY
+                        updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+                        instantPlacementMode = Config.InstantPlacementMode.LOCAL_Y_UP
+                        if(ar.isDepthModeSupported(Config.DepthMode.AUTOMATIC)) {
+                            depthMode = Config.DepthMode.AUTOMATIC
                         }
-                    }
-                } catch (e: Throwable) {
-                    // Instant placement no disponible en este hardware o versión
+                    })
                 }
             }
-
-            latestHitResult = bestHit
-
-            // 3. Cálculo de proyección espacial del Anchor colocado hacia coordenadas de pantalla Flutter
-            var anchorScreenX = 0.0
-            var anchorScreenY = 0.0
-            var anchorNormX = 0.5
-            var anchorNormY = 0.5
-            var anchorDistance = 0.0
-            var anchorYaw = 0.0
-            var anchorPitch = 0.0
-            var isAnchorTracking = false
-            var isAnchorInView = false
-
-            val anchor = currentAnchor
-            if (anchor != null && anchor.trackingState == TrackingState.TRACKING) {
-                isAnchorTracking = true
-                camera.getViewMatrix(viewMatrix, 0)
-                camera.getProjectionMatrix(projMatrix, 0, 0.1f, 100.0f)
-                Matrix.multiplyMM(vpMatrix, 0, projMatrix, 0, viewMatrix, 0)
-
-                val anchorPose = anchor.pose
-                val worldPos = floatArrayOf(anchorPose.tx(), anchorPose.ty(), anchorPose.tz(), 1.0f)
-                val clipPos = FloatArray(4)
-                Matrix.multiplyMV(clipPos, 0, vpMatrix, 0, worldPos, 0)
-
-                if (clipPos[3] > 0.05f) { // Delante del plano near
-                    val ndcX = clipPos[0] / clipPos[3]
-                    val ndcY = clipPos[1] / clipPos[3]
-                    anchorNormX = (ndcX + 1.0) * 0.5
-                    anchorNormY = (1.0 - ndcY) * 0.5
-                    anchorScreenX = anchorNormX * viewportWidth
-                    anchorScreenY = anchorNormY * viewportHeight
-                    anchorDistance = clipPos[3].toDouble()
-                    isAnchorInView = (ndcX in -1.2f..1.2f) && (ndcY in -1.2f..1.2f)
-                }
-
-                // Cálculo de perspectiva angular cámara <-> anclaje en el espacio físico
-                try {
-                    val cameraPose = camera.pose
-                    val relPose = cameraPose.inverse().compose(anchorPose)
-                    val relX = relPose.tx().toDouble()
-                    val relY = relPose.ty().toDouble()
-                    val relZ = relPose.tz().toDouble()
-                    anchorYaw = Math.atan2(relX, -relZ)
-                    anchorPitch = Math.atan2(relY, -relZ)
-                } catch (e: Exception) {
-                    anchorYaw = 0.0
-                    anchorPitch = 0.0
-                }
-            }
-
-            // 4. Emisión throttled a Flutter (~120ms) de telemetría completa de diagnóstico y planos
-            val now = System.currentTimeMillis()
-            if (now - lastPlanesEmitTime > 120) {
-                lastPlanesEmitTime = now
-                eventsSentCount++
-
-                val planesData = validPlanes.map { plane ->
-                    val pose = plane.centerPose
-                    mapOf(
-                        "id" to plane.hashCode().toString(),
-                        "type" to "horizontalUpward",
-                        "extentX" to plane.extentX.toDouble(),
-                        "extentZ" to plane.extentZ.toDouble(),
-                        "centerPoseX" to pose.tx().toDouble(),
-                        "centerPoseY" to pose.ty().toDouble(),
-                        "centerPoseZ" to pose.tz().toDouble()
-                    )
-                }
-
-                val statusData = mapOf(
-                    "sessionState" to "ACTIVE",
-                    "cameraTrackingState" to trackingState.name,
-                    "trackingFailureReason" to trackingFailureReason,
-                    "frameTimestampNs" to frameTimestamp,
-                    "eventsSentCount" to eventsSentCount,
-                    "knownPlanesCount" to allPlanes.size,
-                    "validPlanesCount" to validPlanes.size,
-                    "nonHorizontalPlanesCount" to nonHorizontalCount,
-                    "pausedPlanesCount" to pausedCount,
-                    "subsumedPlanesCount" to subsumedCount,
-                    "planeDiscardReason" to planeDiscardReason,
-                    "hasValidPlacementPoint" to (bestHit != null),
-                    "hasHitAtReticle" to (bestHit != null),
-                    "placementPointType" to hitType,
-                    "hitDistanceMeters" to hitDistance,
-                    "anchorScreenX" to anchorScreenX,
-                    "anchorScreenY" to anchorScreenY,
-                    "anchorNormX" to anchorNormX,
-                    "anchorNormY" to anchorNormY,
-                    "anchorDistance" to anchorDistance,
-                    "anchorYaw" to anchorYaw,
-                    "anchorPitch" to anchorPitch,
-                    "isAnchorTracking" to isAnchorTracking,
-                    "isAnchorInView" to isAnchorInView,
-                    "viewportWidth" to viewportWidth.toDouble(),
-                    "viewportHeight" to viewportHeight.toDouble()
-                )
-
-                activity.runOnUiThread {
-                    channel.invokeMethod("onPlanesUpdated", planesData)
-                    channel.invokeMethod("onArStatusUpdated", statusData)
-                }
-            }
-        } catch (e: Exception) {
-            // Tolerar frames transitorios durante inicialización o rotación
-        }
-    }
-
-    /**
-     * Ancla virtualmente el cuento utilizando la pose exacta validada bajo la retícula central.
-     */
-    fun placeStoryAnchor(planeId: String?): Boolean {
-        val currentSession = session ?: return false
-        val frame = latestFrame ?: return false
-        try {
-            // Prioridad 1: Utilizar la pose exacta validada por la retícula central (HitResult)
-            val hit = latestHitResult
-            if (hit != null) {
-                currentAnchor?.detach()
-                currentAnchor = hit.createAnchor()
-                return true
-            }
-
-            // Prioridad 2: Si el usuario presionó el botón y la retícula no tenía un hit en ese frame exacto,
-            // realizar un raycast en el centro en este instante
-            val centerX = viewportWidth / 2.0f
-            val centerY = viewportHeight / 2.0f
-            val fallbackHits = try {
-                frame.hitTest(centerX, centerY)
-            } catch (e: Exception) {
-                emptyList<HitResult>()
-            }
-
-            for (fallbackHit in fallbackHits) {
-                val trackable = fallbackHit.trackable
-                if (trackable is Plane && trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING) {
-                    currentAnchor?.detach()
-                    currentAnchor = fallbackHit.createAnchor()
-                    return true
-                }
-            }
-
-            // Prioridad 3: Intentar hit instantáneo en el centro
-            try {
-                val instantHits = frame.hitTestInstantPlacement(centerX, centerY, 1.5f)
-                if (instantHits.isNotEmpty()) {
-                    currentAnchor?.detach()
-                    currentAnchor = instantHits[0].createAnchor()
-                    return true
-                }
-            } catch (e: Throwable) {
-                // Ignore
-            }
-
-            // Prioridad 4: Plano horizontal detectado
-            val planes = currentSession.getAllTrackables(Plane::class.java)
-            val validPlanes = planes.filter {
-                it.trackingState == TrackingState.TRACKING &&
-                it.subsumedBy == null &&
-                it.type == Plane.Type.HORIZONTAL_UPWARD_FACING
-            }
-
-            val targetPlane = if (!planeId.isNullOrEmpty()) {
-                validPlanes.find { it.hashCode().toString() == planeId } ?: validPlanes.firstOrNull()
-            } else {
-                validPlanes.firstOrNull()
-            }
-
-            if (targetPlane != null) {
-                currentAnchor?.detach()
-                currentAnchor = targetPlane.createAnchor(targetPlane.centerPose)
-                return true
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return false
-    }
-
-    /**
-     * Ancla virtualmente el cuento en las coordenadas de pantalla tocadas por el usuario (Tap-to-place).
-     * [normX] y [normY] son coordenadas normalizadas (0.0 a 1.0) respecto a la vista.
-     */
-    fun placeStoryAtScreenCoordinates(normX: Float, normY: Float): Boolean {
-        val frame = latestFrame ?: return false
-        try {
-            // Conversión segura de coordenadas normalizadas a píxeles nativos del viewport
-            val screenX = if (normX in 0.0f..1.0f) normX * viewportWidth else normX
-            val screenY = if (normY in 0.0f..1.0f) normY * viewportHeight else normY
-
-            // 1. Raycast estándar contra planos detectados
-            val standardHits = try {
-                frame.hitTest(screenX, screenY)
-            } catch (e: Exception) {
-                emptyList<HitResult>()
-            }
-
-            for (hit in standardHits) {
-                val trackable = hit.trackable
-                if (trackable is Plane &&
-                    trackable.type == Plane.Type.HORIZONTAL_UPWARD_FACING &&
-                    trackable.trackingState == TrackingState.TRACKING
-                ) {
-                    currentAnchor?.detach()
-                    currentAnchor = hit.createAnchor()
-                    return true
-                }
-            }
-
-            // 2. Instant placement en las coordenadas tocadas
-            try {
-                val instantHits = frame.hitTestInstantPlacement(screenX, screenY, 1.5f)
-                for (hit in instantHits) {
-                    val trackable = hit.trackable
-                    if (trackable is InstantPlacementPoint &&
-                        trackable.trackingState == TrackingState.TRACKING
-                    ) {
-                        currentAnchor?.detach()
-                        currentAnchor = hit.createAnchor()
-                        return true
-                    }
-                }
-            } catch (e: Throwable) {
-                // Instant placement no disponible
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return false
-    }
-
-    fun resumeSession() {
-        try {
-            displayRotationHelper.onResume()
+            session?.setCameraTextureName(background.textureId)
+            rotation.onResume()
             session?.resume()
-            glSurfaceView.onResume()
-        } catch (e: Exception) {
-            e.printStackTrace()
+            configured = true
+        } catch (e: Exception) { android.util.Log.e("TaleStarAR","Session initialization",e) }
+    }
+    override fun onSurfaceChanged(gl: GL10?, w: Int, h: Int) {
+        width=w; height=h
+        rotation.onSurfaceChanged(w,h)
+        GLES20.glViewport(0,0,w,h)
+    }
+    override fun onDrawFrame(gl: GL10?) {
+        GLES20.glClearColor(.08f,.07f,.12f,1f)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+        val now = System.nanoTime()
+        val dt = if(lastTime == 0L) 0f else (now-lastTime)/1_000_000_000f
+        lastTime = now
+        if (preview) {
+            Matrix.setIdentityM(anchorMatrix,0)
+            storyRenderer.draw(vp,anchorMatrix,previewDynamics,0f,0f,true,width.toFloat()/height)
+            return
         }
+        val ar = session ?: return
+        if (!configured || disposed) return
+        try {
+            rotation.updateSessionIfNeeded(ar)
+            val current = ar.update()
+            frame = current
+            val camera = current.camera
+            background.draw(current)
+            camera.getViewMatrix(viewMatrix,0)
+            camera.getProjectionMatrix(projection,0,.01f,50f)
+            Matrix.multiplyMM(vp,0,projection,0,viewMatrix,0)
+            val tracking = camera.trackingState == TrackingState.TRACKING
+            val attached = anchor
+            if(instantPoint?.trackingMethod==InstantPlacementPoint.TrackingMethod.FULL_TRACKING) {
+                placementType="INSTANT_FULL"
+            }
+            if(placed && tracking && attached?.trackingState == TrackingState.TRACKING) {
+                attached.pose.toMatrix(anchorMatrix,0)
+                dynamics.advance(dt)
+                storyRenderer.draw(vp,anchorMatrix,dynamics,offsetX,offsetZ,false,width.toFloat()/height)
+            }
+            if(now-lastEmit > 120_000_000L) {
+                lastEmit=now; events++
+                val planes=ar.getAllTrackables(Plane::class.java)
+                val valid=planes.filter { it.subsumedBy==null && it.type==Plane.Type.HORIZONTAL_UPWARD_FACING && it.trackingState==TrackingState.TRACKING }
+                val candidate=if(tracking && !placed) placementCandidate(.5f,.5f) else null
+                val planesData=valid.map { p -> mapOf("id" to p.hashCode().toString(),"type" to "horizontalUpward","extentX" to p.extentX.toDouble(),"extentZ" to p.extentZ.toDouble(),"centerPoseX" to p.centerPose.tx().toDouble(),"centerPoseY" to p.centerPose.ty().toDouble(),"centerPoseZ" to p.centerPose.tz().toDouble()) }
+                val status=mapOf(
+                    "sessionState" to "ACTIVE", "cameraTrackingState" to camera.trackingState.name,
+                    "trackingFailureReason" to if(tracking) "NONE" else camera.trackingFailureReason.name,
+                    "frameTimestampNs" to current.timestamp,"eventsSentCount" to events,
+                    "knownPlanesCount" to planes.size,"validPlanesCount" to valid.size,
+                    "hasValidPlacementPoint" to (candidate!=null),"hasHitAtReticle" to (candidate!=null),
+                    "placementPointType" to (if(placed) placementType else candidate?.second?.name ?: "NONE"),
+                    "hitDistanceMeters" to (candidate?.first?.distance?.toDouble() ?: 0.0),
+                    "planeDiscardReason" to if(valid.isEmpty()) "Aún no hay un contorno de mesa; buscando puntos de apoyo" else "Apunta al interior de la superficie detectada",
+                    "isAnchorTracking" to (tracking && attached?.trackingState==TrackingState.TRACKING),
+                    "viewportWidth" to width.toDouble(),"viewportHeight" to height.toDouble()
+                )
+                activity.runOnUiThread { if(!disposed) { channel.invokeMethod("onPlanesUpdated",planesData); channel.invokeMethod("onArStatusUpdated",status) } }
+            }
+        } catch(e: Exception) { android.util.Log.w("TaleStarAR","Transient AR frame",e) }
+    }
+    private fun placementCandidate(x: Float,y: Float): Pair<HitResult, SurfacePlacementPolicy.Source>? {
+        val current=frame ?: return null
+        val candidates=mutableListOf<Pair<HitResult, SurfacePlacementPolicy.Source>>()
+        for(hit in current.hitTest(x*width,y*height)) {
+            val p=hit.trackable
+            val normalY=hit.hitPose.getTransformedAxis(1,1f)[1]
+            if(!SurfacePlacementPolicy.eligible(hit.distance,normalY,p.trackingState==TrackingState.TRACKING)) continue
+            val source=when {
+                p is Plane && p.type==Plane.Type.HORIZONTAL_UPWARD_FACING && p.isPoseInPolygon(hit.hitPose) -> SurfacePlacementPolicy.Source.CONFIRMED_PLANE
+                p is Plane && p.type==Plane.Type.HORIZONTAL_UPWARD_FACING && p.isPoseInExtents(hit.hitPose) -> SurfacePlacementPolicy.Source.PLANE_EXTENT
+                p is DepthPoint -> SurfacePlacementPolicy.Source.DEPTH_SURFACE
+                p is Point && p.orientationMode==Point.OrientationMode.ESTIMATED_SURFACE_NORMAL -> SurfacePlacementPolicy.Source.ORIENTED_POINT
+                else -> null
+            }
+            if(source!=null) candidates.add(hit to source)
+        }
+        // Prefer measured geometry. Instant Placement fills the gap while the plane grows.
+        if(candidates.isNotEmpty()) return SurfacePlacementPolicy.choose(candidates)
+        try {
+            for(hit in current.hitTestInstantPlacement(x*width,y*height,approximateDistance)) {
+                val point=hit.trackable as? InstantPlacementPoint ?: continue
+                if(!SurfacePlacementPolicy.eligible(hit.distance,1f,point.trackingState==TrackingState.TRACKING)) continue
+                val source=if(point.trackingMethod==InstantPlacementPoint.TrackingMethod.FULL_TRACKING)
+                    SurfacePlacementPolicy.Source.INSTANT_FULL else SurfacePlacementPolicy.Source.INSTANT_PLACEMENT
+                candidates.add(hit to source)
+            }
+        } catch(e: Exception) { android.util.Log.d("TaleStarAR","Instant placement is not ready",e) }
+        return SurfacePlacementPolicy.choose(candidates)
+    }
+    /** Hit tests and anchor mutations run on the rendering thread. */
+    fun placeStory(x: Float,y: Float, result: MethodChannel.Result) = onGl(result) {
+        if(frame?.camera?.trackingState != TrackingState.TRACKING) return@onGl false
+        val candidate=placementCandidate(x,y) ?: return@onGl false
+        val hit=candidate.first
+        val replacement=if(hit.trackable is Plane || hit.trackable is InstantPlacementPoint) hit.createAnchor()
+            else hit.trackable.createAnchor(Pose.makeTranslation(hit.hitPose.translation))
+        attachStory(replacement,hit.trackable as? Plane,candidate.second.name)
+        instantPoint=hit.trackable as? InstantPlacementPoint
+        true
     }
 
+    private fun attachStory(replacement: Anchor, plane: Plane?, source: String) {
+        anchor?.detach()
+        anchor=replacement
+        table=plane
+        instantPoint=null
+        placementType=source
+        dynamics=StoryDynamics()
+        // Face the viewer once at placement; never billboard toward later camera movement.
+        val relative=replacement.pose.inverse().compose(frame!!.camera.pose)
+        dynamics.yaw=atan2(relative.tx(),relative.tz())
+        offsetX=0f; offsetZ=0f; preview=false; placed=true
+    }
+
+    /** Explicit fallback: the user supplies distance; this never claims a detected table. */
+    fun placeEstimatedStory(distance: Float, result: MethodChannel.Result) = onGl(result) {
+        val current=frame ?: return@onGl false
+        if(current.camera.trackingState!=TrackingState.TRACKING) return@onGl false
+        val inverse=FloatArray(16)
+        if(!Matrix.invertM(inverse,0,vp,0)) return@onGl false
+        val near=FloatArray(4); val far=FloatArray(4)
+        Matrix.multiplyMV(near,0,inverse,0,floatArrayOf(0f,0f,-1f,1f),0)
+        Matrix.multiplyMV(far,0,inverse,0,floatArrayOf(0f,0f,1f,1f),0)
+        val direction=FloatArray(3) { far[it]/far[3]-near[it]/near[3] }
+        approximateDistance=distance.coerceIn(.25f,2f)
+        val camera=current.camera.pose.translation
+        val world=SurfacePlacementPolicy.estimate(camera,direction,distance) ?: return@onGl false
+        val replacement=session?.createAnchor(Pose.makeTranslation(world)) ?: return@onGl false
+        attachStory(replacement,null,"MANUAL_ESTIMATE")
+        true
+    }
+    fun setPage(imageBytes: ByteArray?, text: String, page: Int, total: Int, result: MethodChannel.Result) {
+        val version=++pageVersion
+        pageExecutor.execute {
+            try {
+                val image=imageBytes?.let { bytes ->
+                    val options=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+                    BitmapFactory.decodeByteArray(bytes,0,bytes.size,options)
+                    var sample=1
+                    while(options.outWidth/sample>1536 || options.outHeight/sample>1536) sample*=2
+                    options.inJustDecodeBounds=false
+                    options.inSampleSize=sample
+                    BitmapFactory.decodeByteArray(bytes,0,bytes.size,options)
+                        ?: throw IllegalArgumentException("No se pudo leer la ilustración del backend")
+                }
+                val bitmap=StorySceneRenderer.pageBitmap(image,text,page,total)
+                image?.recycle()
+                if(disposed) { bitmap.recycle(); return@execute }
+                glSurfaceView.queueEvent {
+                    if(version==pageVersion && !disposed) storyRenderer.setPage(bitmap) else bitmap.recycle()
+                    activity.runOnUiThread { result.success(true) }
+                }
+            } catch(e: Exception) { activity.runOnUiThread { result.error("STORY_TEXTURE",e.message,null) } }
+        }
+    }
+    fun sceneCommand(command: String, args: Map<*,*>?, result: MethodChannel.Result) = onGl(result) {
+        fun number(key: String, default: Float=0f)=(args?.get(key) as? Number)?.toFloat() ?: default
+        val body=if(preview) previewDynamics else dynamics
+        when(command) {
+            "preview" -> {
+                val enabled=args?.get("enabled")==true
+                if(enabled && !preview) { previewDynamics.scale=1f; previewDynamics.yaw=0f; previewDynamics.standUp() }
+                if(enabled && !preview) session?.pause()
+                if(!enabled && preview) session?.resume()
+                dynamics.held=false; preview=enabled; lastTime=0L
+            }
+            "physics" -> { dynamics.physics=args?.get("enabled")==true; dynamics.angularVelocity=0f }
+            "stand" -> body.standUp()
+            "clear" -> {
+                if(preview) session?.resume()
+                anchor?.detach(); anchor=null; table=null; instantPoint=null; placed=false; preview=false
+            }
+            "begin" -> {
+                body.held=true; body.angularVelocity=0f
+                val point=tablePoint(number("x"),number("y"))
+                grabOffset=if(point!=null) floatArrayOf(offsetX-point[0],offsetZ-point[1]) else floatArrayOf(0f,0f)
+            }
+            "end" -> body.held=false
+            "transform" -> {
+                body.manipulate(number("scale",body.scale),number("yaw"),number("tilt"))
+                if(args?.get("move")==true && !preview) {
+                    val point=tablePoint(number("x"),number("y"))
+                    if(point!=null) {
+                        val x=point[0]+grabOffset[0]; val z=point[1]+grabOffset[1]
+                        var p=table
+                        while(p?.subsumedBy!=null) p=p.subsumedBy
+                        val world=anchor?.pose?.transformPoint(floatArrayOf(x,0f,z))
+                        val inside=if(p==null) abs(x)<.75f && abs(z)<.75f
+                            else world!=null && (p.isPoseInPolygon(Pose.makeTranslation(world)) || p.isPoseInExtents(Pose.makeTranslation(world)))
+                        if(inside && abs(x)<2f && abs(z)<2f) { offsetX=x; offsetZ=z }
+                    }
+                }
+            }
+        }
+        true
+    }
+    /** Screen ray intersected with y=0 in anchor space, without switching surfaces. */
+    private fun tablePoint(x: Float,y: Float): FloatArray? {
+        if(preview || frame?.camera?.trackingState!=TrackingState.TRACKING) return null
+        val attached=anchor ?: return null
+        val inverse=FloatArray(16)
+        if(!Matrix.invertM(inverse,0,vp,0)) return null
+        fun unproject(z: Float): FloatArray {
+            val p=FloatArray(4)
+            Matrix.multiplyMV(p,0,inverse,0,floatArrayOf(2*x-1,1-2*y,z,1f),0)
+            return attached.pose.inverse().transformPoint(floatArrayOf(p[0]/p[3],p[1]/p[3],p[2]/p[3]))
+        }
+        val near=unproject(-1f); val far=unproject(1f)
+        val dy=far[1]-near[1]
+        if(abs(dy)<.0001f) return null
+        val t=-near[1]/dy
+        if(t<0f || t>1f) return null
+        return floatArrayOf(near[0]+t*(far[0]-near[0]),near[2]+t*(far[2]-near[2]))
+    }
+    private fun onGl(result: MethodChannel.Result, action: ()->Boolean) {
+        if(disposed) { result.success(false); return }
+        glSurfaceView.queueEvent {
+            try { val success=action(); activity.runOnUiThread { result.success(success) } }
+            catch(e: Exception) { activity.runOnUiThread { result.error("AR_SCENE",e.message,null) } }
+        }
+    }
+    fun resumeSession() {
+        if(disposed) return
+        glSurfaceView.onResume()
+        rotation.onResume()
+        glSurfaceView.queueEvent { try { if(!preview) session?.resume(); lastTime=0L } catch(e: Exception) { android.util.Log.w("TaleStarAR","Resume",e) } }
+    }
     fun pauseSession() {
-        try {
-            displayRotationHelper.onPause()
-            glSurfaceView.onPause()
-            session?.pause()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        rotation.onPause()
+        glSurfaceView.queueEvent { try { session?.pause() } catch(_: Exception) {} }
+        glSurfaceView.onPause()
     }
-
     override fun dispose() {
-        try {
-            displayRotationHelper.onPause()
-            currentAnchor?.detach()
-            currentAnchor = null
-            latestHitResult = null
-            latestFrame = null
-            glSurfaceView.onPause()
-            session?.pause()
-            session?.close()
-            session = null
-            isSessionConfigured = false
-            onDisposed?.invoke(this)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        if(disposed) return
+        disposed=true
+        pageExecutor.shutdown()
+        rotation.onPause()
+        glSurfaceView.queueEvent { anchor?.detach(); anchor=null; storyRenderer.dispose(); session?.close(); session=null; configured=false }
+        glSurfaceView.onPause()
+        onDisposed?.invoke(this)
     }
 }

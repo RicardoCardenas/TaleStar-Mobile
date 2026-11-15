@@ -136,6 +136,9 @@ class MockArService implements ArService {
   }
 
   @override
+  Future<bool> placeEstimatedStory(double distance) => placeStoryAnchor('manual-estimate');
+
+  @override
   Future<void> dispose() async {
     await stopSession();
     await _planesController.close();

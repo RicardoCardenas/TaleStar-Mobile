@@ -20,7 +20,7 @@ class AuthInterceptor extends QueuedInterceptor {
     RequestOptions options,
     RequestInterceptorHandler handler,
   ) async {
-    options.headers['Accept'] = 'application/json';
+    options.headers.putIfAbsent('Accept', () => 'application/json');
 
     // No sobreescribir si ya viene un Authorization explícito
     if (!options.headers.containsKey('Authorization')) {

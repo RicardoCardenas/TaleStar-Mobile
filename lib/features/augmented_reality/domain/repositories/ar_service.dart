@@ -28,10 +28,12 @@ abstract class ArService {
   /// Ancla virtualmente el cuento en una coordenada específica de pantalla mediante hit-test.
   Future<bool> placeStoryAtCoordinates(double x, double y);
 
+  /// Places a world anchor at a user-specified distance when surface detection is unavailable.
+  Future<bool> placeEstimatedStory(double distance);
+
   /// Detiene la sesión AR, apaga la cámara y libera recursos nativos.
   Future<void> stopSession();
 
   /// Libera por completo los canales y recursos.
   Future<void> dispose();
 }
-

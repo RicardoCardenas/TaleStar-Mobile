@@ -23,30 +23,36 @@ void main() {
       'created_at': '2026-10-31T10:00:00.000Z',
     };
 
-    test('fromJson parsea correctamente todos los campos documentados en el backend', () {
-      final model = StoryResponseModel.fromJson(tJsonComplete);
+    test(
+      'fromJson parsea correctamente todos los campos documentados en el backend',
+      () {
+        final model = StoryResponseModel.fromJson(tJsonComplete);
 
-      expect(model.id, 'story-uuid-1');
-      expect(model.title, 'El Pequeño Astronauta');
-      expect(model.description, 'Una aventura sobre las estrellas.');
-      expect(model.scenarioId, 'scenario-uuid-1');
-      expect(model.styleProfileId, 'style-uuid-1');
-      expect(model.seed, 42);
-      expect(model.createdAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
-      expect(model.updatedAt, DateTime.parse('2026-10-31T11:00:00.000Z'));
-    });
+        expect(model.id, 'story-uuid-1');
+        expect(model.title, 'El Pequeño Astronauta');
+        expect(model.description, 'Una aventura sobre las estrellas.');
+        expect(model.scenarioId, 'scenario-uuid-1');
+        expect(model.styleProfileId, 'style-uuid-1');
+        expect(model.seed, 42);
+        expect(model.createdAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
+        expect(model.updatedAt, DateTime.parse('2026-10-31T11:00:00.000Z'));
+      },
+    );
 
-    test('fromJson maneja campos opcionales nulos con valores por defecto seguros', () {
-      final model = StoryResponseModel.fromJson(tJsonMinimal);
+    test(
+      'fromJson maneja campos opcionales nulos con valores por defecto seguros',
+      () {
+        final model = StoryResponseModel.fromJson(tJsonMinimal);
 
-      expect(model.id, 'story-uuid-2');
-      expect(model.title, 'Cuento Simple');
-      expect(model.description, '');
-      expect(model.scenarioId, isNull);
-      expect(model.styleProfileId, isNull);
-      expect(model.seed, isNull);
-      expect(model.updatedAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
-    });
+        expect(model.id, 'story-uuid-2');
+        expect(model.title, 'Cuento Simple');
+        expect(model.description, '');
+        expect(model.scenarioId, isNull);
+        expect(model.styleProfileId, isNull);
+        expect(model.seed, isNull);
+        expect(model.updatedAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
+      },
+    );
 
     test('extiende StoryDetail directamente como entidad del dominio', () {
       final model = StoryResponseModel.fromJson(tJsonComplete);
@@ -57,28 +63,50 @@ void main() {
       expect(model.description, 'Una aventura sobre las estrellas.');
     });
 
-    test('toJson serializa con claves snake_case exactas del contrato backend', () {
-      final model = StoryResponseModel.fromJson(tJsonComplete);
-      final json = model.toJson();
+    test(
+      'toJson serializa con claves snake_case exactas del contrato backend',
+      () {
+        final model = StoryResponseModel.fromJson(tJsonComplete);
+        final json = model.toJson();
 
-      expect(json['id'], 'story-uuid-1');
-      expect(json['title'], 'El Pequeño Astronauta');
-      expect(json['description'], 'Una aventura sobre las estrellas.');
-      expect(json['scenario_id'], 'scenario-uuid-1');
-      expect(json['style_profile_id'], 'style-uuid-1');
-      expect(json['seed'], 42);
-      expect(json['created_at'], '2026-10-31T10:00:00.000Z');
-      expect(json['updated_at'], '2026-10-31T11:00:00.000Z');
-    });
+        expect(json['id'], 'story-uuid-1');
+        expect(json['title'], 'El Pequeño Astronauta');
+        expect(json['description'], 'Una aventura sobre las estrellas.');
+        expect(json['scenario_id'], 'scenario-uuid-1');
+        expect(json['style_profile_id'], 'style-uuid-1');
+        expect(json['seed'], 42);
+        expect(json['created_at'], '2026-10-31T10:00:00.000Z');
+        expect(json['updated_at'], '2026-10-31T11:00:00.000Z');
+      },
+    );
   });
 
   group('StoryPageModel', () {
+    test(
+      'reads the generated illustration link from visual_config.asset_id',
+      () {
+        final page = StoryPageModel.fromJson({
+          'id': 'page-linked',
+          'story_id': 'story-linked',
+          'page_number': 1,
+          'visual_config': {'asset_id': 'image-linked'},
+          'created_at': '2026-01-01T00:00:00Z',
+        });
+        expect(page.illustrationAssetId, 'image-linked');
+        expect(page.toJson()['visual_config'], {'asset_id': 'image-linked'});
+        expect(
+          page.copyWith(text: 'Updated').illustrationAssetId,
+          'image-linked',
+        );
+      },
+    );
     final tPageJsonComplete = {
       'id': 'page-uuid-1',
       'story_id': 'story-uuid-1',
       'page_number': 1,
       'action': 'Leo mira por el telescopio.',
-      'text': 'Había una vez un niño llamado Leo que soñaba con tocar las estrellas.',
+      'text':
+          'Había una vez un niño llamado Leo que soñaba con tocar las estrellas.',
       'visual_config': {'palette': 'warm', 'camera': 'wide'},
       'character_ids': ['char-1', 'char-2'],
       'seed': 1234,
@@ -93,34 +121,43 @@ void main() {
       'created_at': '2026-10-31T10:00:00.000Z',
     };
 
-    test('fromJson parsea correctamente todos los campos de StoryPageResponse', () {
-      final model = StoryPageModel.fromJson(tPageJsonComplete);
+    test(
+      'fromJson parsea correctamente todos los campos de StoryPageResponse',
+      () {
+        final model = StoryPageModel.fromJson(tPageJsonComplete);
 
-      expect(model.id, 'page-uuid-1');
-      expect(model.storyId, 'story-uuid-1');
-      expect(model.pageNumber, 1);
-      expect(model.action, 'Leo mira por el telescopio.');
-      expect(model.text, 'Había una vez un niño llamado Leo que soñaba con tocar las estrellas.');
-      expect(model.visualConfig['palette'], 'warm');
-      expect(model.characterIds, ['char-1', 'char-2']);
-      expect(model.seed, 1234);
-      expect(model.createdAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
-      expect(model.updatedAt, DateTime.parse('2026-10-31T10:30:00.000Z'));
-    });
+        expect(model.id, 'page-uuid-1');
+        expect(model.storyId, 'story-uuid-1');
+        expect(model.pageNumber, 1);
+        expect(model.action, 'Leo mira por el telescopio.');
+        expect(
+          model.text,
+          'Había una vez un niño llamado Leo que soñaba con tocar las estrellas.',
+        );
+        expect(model.visualConfig['palette'], 'warm');
+        expect(model.characterIds, ['char-1', 'char-2']);
+        expect(model.seed, 1234);
+        expect(model.createdAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
+        expect(model.updatedAt, DateTime.parse('2026-10-31T10:30:00.000Z'));
+      },
+    );
 
-    test('fromJson asigna valores por defecto seguros para campos ausentes', () {
-      final model = StoryPageModel.fromJson(tPageJsonMinimal);
+    test(
+      'fromJson asigna valores por defecto seguros para campos ausentes',
+      () {
+        final model = StoryPageModel.fromJson(tPageJsonMinimal);
 
-      expect(model.id, 'page-uuid-2');
-      expect(model.storyId, 'story-uuid-1');
-      expect(model.pageNumber, 2);
-      expect(model.action, '');
-      expect(model.text, '');
-      expect(model.visualConfig, isEmpty);
-      expect(model.characterIds, isEmpty);
-      expect(model.seed, isNull);
-      expect(model.updatedAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
-    });
+        expect(model.id, 'page-uuid-2');
+        expect(model.storyId, 'story-uuid-1');
+        expect(model.pageNumber, 2);
+        expect(model.action, '');
+        expect(model.text, '');
+        expect(model.visualConfig, isEmpty);
+        expect(model.characterIds, isEmpty);
+        expect(model.seed, isNull);
+        expect(model.updatedAt, DateTime.parse('2026-10-31T10:00:00.000Z'));
+      },
+    );
 
     test('extiende StoryPageDetail como entidad pura de lectura', () {
       final model = StoryPageModel.fromJson(tPageJsonComplete);
@@ -130,21 +167,27 @@ void main() {
       expect(model.storyId, 'story-uuid-1');
       expect(model.pageNumber, 1);
       expect(model.action, 'Leo mira por el telescopio.');
-      expect(model.text, 'Había una vez un niño llamado Leo que soñaba con tocar las estrellas.');
+      expect(
+        model.text,
+        'Había una vez un niño llamado Leo que soñaba con tocar las estrellas.',
+      );
       expect(model.characterIds, ['char-1', 'char-2']);
       expect(model.demoIllustrationAsset, isNull);
     });
 
-    test('toJson serializa conservando los nombres de campo de FastAPI/Pydantic', () {
-      final model = StoryPageModel.fromJson(tPageJsonComplete);
-      final json = model.toJson();
+    test(
+      'toJson serializa conservando los nombres de campo de FastAPI/Pydantic',
+      () {
+        final model = StoryPageModel.fromJson(tPageJsonComplete);
+        final json = model.toJson();
 
-      expect(json['id'], 'page-uuid-1');
-      expect(json['story_id'], 'story-uuid-1');
-      expect(json['page_number'], 1);
-      expect(json['action'], 'Leo mira por el telescopio.');
-      expect(json['character_ids'], ['char-1', 'char-2']);
-      expect(json['visual_config'], isNotNull);
-    });
+        expect(json['id'], 'page-uuid-1');
+        expect(json['story_id'], 'story-uuid-1');
+        expect(json['page_number'], 1);
+        expect(json['action'], 'Leo mira por el telescopio.');
+        expect(json['character_ids'], ['char-1', 'char-2']);
+        expect(json['visual_config'], isNotNull);
+      },
+    );
   });
 }

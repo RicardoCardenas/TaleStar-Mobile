@@ -102,17 +102,34 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "placeStoryAnchor" -> {
-                    val planeId = call.argument<String>("planeId")
-                    val success = activeArView?.placeStoryAnchor(planeId) ?: false
-                    result.success(success)
+                    val view = activeArView
+                    if (view == null) result.success(false)
+                    else view.placeStory(0.5f, 0.5f, result)
                 }
                 "placeStoryAtCoordinates" -> {
                     val rawX = call.argument<Double>("normX") ?: call.argument<Double>("x") ?: 0.5
                     val rawY = call.argument<Double>("normY") ?: call.argument<Double>("y") ?: 0.5
                     val normX = rawX.toFloat()
                     val normY = rawY.toFloat()
-                    val success = activeArView?.placeStoryAtScreenCoordinates(normX, normY) ?: false
-                    result.success(success)
+                    val view = activeArView
+                    if (view == null) result.success(false)
+                    else view.placeStory(normX, normY, result)
+                }
+                "setStoryPage" -> {
+                    val view = activeArView
+                    if (view == null) result.error("AR_VIEW_MISSING", "La escena no está disponible", null)
+                    else view.setPage(call.argument<ByteArray>("imageBytes"), call.argument<String>("text") ?: "",
+                        call.argument<Int>("page") ?: 1, call.argument<Int>("total") ?: 1, result)
+                }
+                "placeEstimatedStory" -> {
+                    val view = activeArView
+                    if (view == null) result.success(false)
+                    else view.placeEstimatedStory((call.argument<Double>("distance") ?: 0.75).toFloat(), result)
+                }
+                "storySceneCommand" -> {
+                    val view = activeArView
+                    if (view == null) result.success(false)
+                    else view.sceneCommand(call.argument<String>("command") ?: "", call.arguments as? Map<*, *>, result)
                 }
                 else -> result.notImplemented()
             }

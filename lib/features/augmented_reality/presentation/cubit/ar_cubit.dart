@@ -17,29 +17,36 @@ class ArCubit extends Cubit<ArState> {
   ArCubit({
     required ArService arService,
     required ReaderRepository readerRepository,
-  })  : _arService = arService,
-        _readerRepository = readerRepository,
-        super(const ArState());
+  }) : _arService = arService,
+       _readerRepository = readerRepository,
+       super(const ArState());
 
   /// Realiza la verificación previa de compatibilidad del hardware con ARCore.
   Future<bool> checkCompatibility() async {
-    emit(state.copyWith(status: ArStatus.checkingCompatibility, clearError: true));
+    emit(
+      state.copyWith(status: ArStatus.checkingCompatibility, clearError: true),
+    );
     try {
       final info = await _arService.checkCompatibility();
       if (!isClosed) {
-        emit(state.copyWith(
-          status: info.isSupported ? ArStatus.initial : ArStatus.error,
-          compatibilityInfo: info,
-          errorMessage: info.isSupported ? null : info.userMessage,
-        ));
+        emit(
+          state.copyWith(
+            status: info.isSupported ? ArStatus.initial : ArStatus.error,
+            compatibilityInfo: info,
+            errorMessage: info.isSupported ? null : info.userMessage,
+          ),
+        );
       }
       return info.isSupported;
     } catch (e) {
       if (!isClosed) {
-        emit(state.copyWith(
-          status: ArStatus.error,
-          errorMessage: 'Error al comprobar compatibilidad de Realidad Aumentada: $e',
-        ));
+        emit(
+          state.copyWith(
+            status: ArStatus.error,
+            errorMessage:
+                'Error al comprobar compatibilidad de Realidad Aumentada: $e',
+          ),
+        );
       }
       return false;
     }
@@ -50,13 +57,15 @@ class ArCubit extends Cubit<ArState> {
     required String storyId,
     int initialPageIndex = 0,
   }) async {
-    emit(state.copyWith(
-      status: ArStatus.checkingCompatibility,
-      storyId: storyId,
-      currentPageIndex: initialPageIndex,
-      clearError: true,
-      clearSelection: true,
-    ));
+    emit(
+      state.copyWith(
+        status: ArStatus.checkingCompatibility,
+        storyId: storyId,
+        currentPageIndex: initialPageIndex,
+        clearError: true,
+        clearSelection: true,
+      ),
+    );
 
     try {
       // 1. Verificación obligatoria de compatibilidad
@@ -64,10 +73,12 @@ class ArCubit extends Cubit<ArState> {
       emit(state.copyWith(compatibilityInfo: compatibility));
 
       if (!compatibility.isSupported) {
-        emit(state.copyWith(
-          status: ArStatus.error,
-          errorMessage: compatibility.userMessage,
-        ));
+        emit(
+          state.copyWith(
+            status: ArStatus.error,
+            errorMessage: compatibility.userMessage,
+          ),
+        );
         return false;
       }
 
@@ -76,11 +87,16 @@ class ArCubit extends Cubit<ArState> {
       final pages = await _readerRepository.getStoryPages(storyId);
       pages.sort((a, b) => a.pageNumber.compareTo(b.pageNumber));
 
-      emit(state.copyWith(
-        story: story,
-        pages: pages,
-        currentPageIndex: initialPageIndex.clamp(0, pages.isEmpty ? 0 : pages.length - 1),
-      ));
+      emit(
+        state.copyWith(
+          story: story,
+          pages: pages,
+          currentPageIndex: initialPageIndex.clamp(
+            0,
+            pages.isEmpty ? 0 : pages.length - 1,
+          ),
+        ),
+      );
 
       // 3. Comprobación y solicitud de permiso de cámara
       emit(state.copyWith(status: ArStatus.requestingPermission));
@@ -88,10 +104,13 @@ class ArCubit extends Cubit<ArState> {
       if (!hasPermission) {
         final granted = await _arService.requestCameraPermission();
         if (!granted) {
-          emit(state.copyWith(
-            status: ArStatus.error,
-            errorMessage: 'Se requiere permiso de acceso a la cámara para la Realidad Aumentada.',
-          ));
+          emit(
+            state.copyWith(
+              status: ArStatus.error,
+              errorMessage:
+                  'Se requiere permiso de acceso a la cámara para la Realidad Aumentada.',
+            ),
+          );
           return false;
         }
       }
@@ -105,50 +124,59 @@ class ArCubit extends Cubit<ArState> {
       _planesSubscription = _arService.planesStream.listen((planes) {
         if (!isClosed && planes.isNotEmpty) {
           final firstPlane = planes.first;
-          emit(state.copyWith(
-            detectedPlanes: planes,
-            selectedPlane: state.selectedPlane ?? firstPlane,
-            status: state.isStoryPlaced ? state.status : ArStatus.surfaceDetected,
-          ));
+          emit(
+            state.copyWith(
+              detectedPlanes: planes,
+              selectedPlane: state.selectedPlane ?? firstPlane,
+              status: state.isStoryPlaced
+                  ? state.status
+                  : ArStatus.surfaceDetected,
+            ),
+          );
         }
       });
 
       await _statusSubscription?.cancel();
       _statusSubscription = _arService.statusStream.listen((status) {
         if (!isClosed) {
-          final isSurfaceReady = status.hasValidPlacementPoint || state.detectedPlanes.isNotEmpty;
-          emit(state.copyWith(
-            cameraTrackingState: status.cameraTrackingState,
-            trackingFailureReason: status.trackingFailureReason,
-            frameTimestampNs: status.frameTimestampNs,
-            eventsSentCount: status.eventsSentCount,
-            eventsReceivedCount: status.eventsReceivedCount,
-            knownPlanesCount: status.knownPlanesCount,
-            validPlanesCount: status.validPlanesCount,
-            nonHorizontalPlanesCount: status.nonHorizontalPlanesCount,
-            pausedPlanesCount: status.pausedPlanesCount,
-            subsumedPlanesCount: status.subsumedPlanesCount,
-            planeDiscardReason: status.planeDiscardReason,
-            hasValidPlacementPoint: status.hasValidPlacementPoint,
-            hasHitAtReticle: status.hasHitAtReticle,
-            placementPointType: status.placementPointType,
-            hitDistanceMeters: status.hitDistanceMeters,
-            anchorScreenX: status.anchorScreenX,
-            anchorScreenY: status.anchorScreenY,
-            anchorNormX: status.anchorNormX,
-            anchorNormY: status.anchorNormY,
-            anchorDistance: status.anchorDistance,
-            anchorYaw: status.anchorYaw,
-            anchorPitch: status.anchorPitch,
-            isAnchorTracking: status.isAnchorTracking,
-            isAnchorInView: status.isAnchorInView,
-            viewportWidth: status.viewportWidth,
-            viewportHeight: status.viewportHeight,
-            lastTelemetryUpdate: DateTime.now(),
-            status: state.isStoryPlaced
-                ? state.status
-                : (isSurfaceReady ? ArStatus.surfaceDetected : ArStatus.scanningSurface),
-          ));
+          final isSurfaceReady =
+              status.hasValidPlacementPoint || state.detectedPlanes.isNotEmpty;
+          emit(
+            state.copyWith(
+              cameraTrackingState: status.cameraTrackingState,
+              trackingFailureReason: status.trackingFailureReason,
+              frameTimestampNs: status.frameTimestampNs,
+              eventsSentCount: status.eventsSentCount,
+              eventsReceivedCount: status.eventsReceivedCount,
+              knownPlanesCount: status.knownPlanesCount,
+              validPlanesCount: status.validPlanesCount,
+              nonHorizontalPlanesCount: status.nonHorizontalPlanesCount,
+              pausedPlanesCount: status.pausedPlanesCount,
+              subsumedPlanesCount: status.subsumedPlanesCount,
+              planeDiscardReason: status.planeDiscardReason,
+              hasValidPlacementPoint: status.hasValidPlacementPoint,
+              hasHitAtReticle: status.hasHitAtReticle,
+              placementPointType: status.placementPointType,
+              hitDistanceMeters: status.hitDistanceMeters,
+              anchorScreenX: status.anchorScreenX,
+              anchorScreenY: status.anchorScreenY,
+              anchorNormX: status.anchorNormX,
+              anchorNormY: status.anchorNormY,
+              anchorDistance: status.anchorDistance,
+              anchorYaw: status.anchorYaw,
+              anchorPitch: status.anchorPitch,
+              isAnchorTracking: status.isAnchorTracking,
+              isAnchorInView: status.isAnchorInView,
+              viewportWidth: status.viewportWidth,
+              viewportHeight: status.viewportHeight,
+              lastTelemetryUpdate: DateTime.now(),
+              status: state.isStoryPlaced
+                  ? state.status
+                  : (isSurfaceReady
+                        ? ArStatus.surfaceDetected
+                        : ArStatus.scanningSurface),
+            ),
+          );
         }
       });
 
@@ -157,10 +185,12 @@ class ArCubit extends Cubit<ArState> {
       return true;
     } catch (e) {
       if (!isClosed) {
-        emit(state.copyWith(
-          status: ArStatus.error,
-          errorMessage: 'No fue posible iniciar la experiencia AR: $e',
-        ));
+        emit(
+          state.copyWith(
+            status: ArStatus.error,
+            errorMessage: 'No fue posible iniciar la experiencia AR: $e',
+          ),
+        );
       }
       return false;
     }
@@ -168,27 +198,34 @@ class ArCubit extends Cubit<ArState> {
 
   /// Coloca virtualmente el cuento anclado a la superficie plana detectada o retícula espacial.
   Future<bool> placeStory() async {
-    final plane = state.selectedPlane ?? (state.detectedPlanes.isNotEmpty ? state.detectedPlanes.first : null);
+    final plane =
+        state.selectedPlane ??
+        (state.detectedPlanes.isNotEmpty ? state.detectedPlanes.first : null);
     final targetPlaneId = plane?.id ?? 'reticle-anchor';
 
     try {
       final success = await _arService.placeStoryAnchor(targetPlaneId);
       if (success && !isClosed) {
-        emit(state.copyWith(
-          status: ArStatus.storyPlaced,
-          placedPlaneId: targetPlaneId,
-          selectedPlane: plane,
-          clearError: true,
-        ));
+        emit(
+          state.copyWith(
+            status: ArStatus.storyPlaced,
+            placedPlaneId: targetPlaneId,
+            selectedPlane: plane,
+            clearError: true,
+          ),
+        );
         return true;
       }
       return false;
     } catch (e) {
       if (!isClosed) {
-        emit(state.copyWith(
-          status: ArStatus.error,
-          errorMessage: 'No fue posible anclar el cuento en la superficie: $e',
-        ));
+        emit(
+          state.copyWith(
+            status: ArStatus.error,
+            errorMessage:
+                'No fue posible anclar el cuento en la superficie: $e',
+          ),
+        );
       }
       return false;
     }
@@ -199,11 +236,13 @@ class ArCubit extends Cubit<ArState> {
     try {
       final success = await _arService.placeStoryAtCoordinates(x, y);
       if (success && !isClosed) {
-        emit(state.copyWith(
-          status: ArStatus.storyPlaced,
-          placedPlaneId: 'tap-anchor',
-          clearError: true,
-        ));
+        emit(
+          state.copyWith(
+            status: ArStatus.storyPlaced,
+            placedPlaneId: 'tap-anchor',
+            clearError: true,
+          ),
+        );
         return true;
       }
       return false;
@@ -213,12 +252,39 @@ class ArCubit extends Cubit<ArState> {
   }
 
   /// Permite volver al modo de detección para recolocar el cuento en otra superficie plana.
+  void showStoryPreview() {
+    emit(
+      state.copyWith(status: ArStatus.storyPlaced, placedPlaneId: 'preview'),
+    );
+  }
+
+  Future<bool> placeEstimatedStory(double distance) async {
+    try {
+      final success = await _arService.placeEstimatedStory(distance);
+      if (success && !isClosed) {
+        emit(
+          state.copyWith(
+            status: ArStatus.storyPlaced,
+            placedPlaneId: 'manual-estimate',
+            placementPointType: 'MANUAL_ESTIMATE',
+            clearError: true,
+          ),
+        );
+      }
+      return success;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void repositionStory() {
-    emit(state.copyWith(
-      status: state.detectedPlanes.isNotEmpty
-          ? ArStatus.surfaceDetected
-          : ArStatus.scanningSurface,
-    ));
+    emit(
+      state.copyWith(
+        status: state.detectedPlanes.isNotEmpty
+            ? ArStatus.surfaceDetected
+            : ArStatus.scanningSurface,
+      ),
+    );
   }
 
   /// Ajusta el escalado (tamaño) del cuento 3D colocado en el espacio.
@@ -229,10 +295,16 @@ class ArCubit extends Cubit<ArState> {
 
   /// Ajusta la rotación ligera del cuento 3D para adaptarlo a la perspectiva del usuario.
   void setCardRotation({double? rotationY, double? rotationX}) {
-    emit(state.copyWith(
-      cardRotationY: rotationY != null ? rotationY.clamp(-0.45, 0.45) : state.cardRotationY,
-      cardRotationX: rotationX != null ? rotationX.clamp(-0.35, 0.35) : state.cardRotationX,
-    ));
+    emit(
+      state.copyWith(
+        cardRotationY: rotationY != null
+            ? rotationY.clamp(-0.45, 0.45)
+            : state.cardRotationY,
+        cardRotationX: rotationX != null
+            ? rotationX.clamp(-0.35, 0.35)
+            : state.cardRotationX,
+      ),
+    );
   }
 
   /// Restablece la orientación y el tamaño del panel AR a sus valores predeterminados.
@@ -267,10 +339,7 @@ class ArCubit extends Cubit<ArState> {
     _statusSubscription = null;
     await _arService.stopSession();
     if (!isClosed) {
-      emit(state.copyWith(
-        status: ArStatus.sessionEnded,
-        clearSelection: true,
-      ));
+      emit(state.copyWith(status: ArStatus.sessionEnded, clearSelection: true));
     }
   }
 

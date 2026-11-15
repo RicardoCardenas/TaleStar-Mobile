@@ -12,6 +12,7 @@ import 'package:startale_mobile/features/reader/domain/entities/story_page_detai
 import 'package:startale_mobile/features/reader/domain/repositories/reader_repository.dart';
 
 class MockArService extends Mock implements ArService {}
+
 class MockReaderRepository extends Mock implements ReaderRepository {}
 
 void main() {
@@ -68,7 +69,8 @@ void main() {
     isSupported: false,
     availability: ArCoreAvailability.unsupportedDeviceNotCapable,
     deviceModel: 'Xiaomi Redmi Note 13 4G (23129RA5FL)',
-    userMessage: 'Tu dispositivo no cuenta con la certificación oficial de Google ARCore.',
+    userMessage:
+        'Tu dispositivo no cuenta con la certificación oficial de Google ARCore.',
   );
 
   const tPlane = ArPlane(
@@ -84,18 +86,36 @@ void main() {
     planesController = StreamController<List<ArPlane>>.broadcast();
     statusController = StreamController<ArStatusUpdate>.broadcast();
 
-    when(() => mockArService.planesStream).thenAnswer((_) => planesController.stream);
-    when(() => mockArService.statusStream).thenAnswer((_) => statusController.stream);
-    when(() => mockArService.checkCompatibility()).thenAnswer((_) async => tCompatibleInfo);
-    when(() => mockArService.hasCameraPermission()).thenAnswer((_) async => true);
-    when(() => mockArService.requestCameraPermission()).thenAnswer((_) async => true);
+    when(
+      () => mockArService.planesStream,
+    ).thenAnswer((_) => planesController.stream);
+    when(
+      () => mockArService.statusStream,
+    ).thenAnswer((_) => statusController.stream);
+    when(
+      () => mockArService.checkCompatibility(),
+    ).thenAnswer((_) async => tCompatibleInfo);
+    when(
+      () => mockArService.hasCameraPermission(),
+    ).thenAnswer((_) async => true);
+    when(
+      () => mockArService.requestCameraPermission(),
+    ).thenAnswer((_) async => true);
     when(() => mockArService.initializeSession()).thenAnswer((_) async {});
-    when(() => mockArService.placeStoryAnchor(any())).thenAnswer((_) async => true);
-    when(() => mockArService.placeStoryAtCoordinates(any(), any())).thenAnswer((_) async => true);
+    when(
+      () => mockArService.placeStoryAnchor(any()),
+    ).thenAnswer((_) async => true);
+    when(
+      () => mockArService.placeStoryAtCoordinates(any(), any()),
+    ).thenAnswer((_) async => true);
     when(() => mockArService.stopSession()).thenAnswer((_) async {});
 
-    when(() => mockReaderRepository.getStory(tStoryId)).thenAnswer((_) async => tStory);
-    when(() => mockReaderRepository.getStoryPages(tStoryId)).thenAnswer((_) async => tPages);
+    when(
+      () => mockReaderRepository.getStory(tStoryId),
+    ).thenAnswer((_) async => tStory);
+    when(
+      () => mockReaderRepository.getStoryPages(tStoryId),
+    ).thenAnswer((_) async => tPages);
   });
 
   tearDown(() async {
@@ -111,6 +131,21 @@ void main() {
   }
 
   group('ArCubit', () {
+    test(
+      'colocación manual sale del escaneo sin afirmar que detectó una mesa',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
+        when(
+          () => mockArService.placeEstimatedStory(.75),
+        ).thenAnswer((_) async => true);
+        expect(await cubit.placeEstimatedStory(.75), isTrue);
+        expect(cubit.state.isStoryPlaced, isTrue);
+        expect(cubit.state.placementPointType, 'MANUAL_ESTIMATE');
+        expect(cubit.state.isConfirmedPlacement, isFalse);
+        await cubit.close();
+      },
+    );
     test('estado inicial está vacío y sin superficies ni cuento cargado', () {
       final cubit = buildCubit();
       expect(cubit.state, const ArState());
@@ -119,132 +154,177 @@ void main() {
       cubit.close();
     });
 
-    test('checkCompatibility con dispositivo compatible retorna true', () async {
-      final cubit = buildCubit();
+    test(
+      'checkCompatibility con dispositivo compatible retorna true',
+      () async {
+        final cubit = buildCubit();
 
-      final result = await cubit.checkCompatibility();
+        final result = await cubit.checkCompatibility();
 
-      expect(result, isTrue);
-      expect(cubit.state.compatibilityInfo, equals(tCompatibleInfo));
-      expect(cubit.state.status, ArStatus.initial);
+        expect(result, isTrue);
+        expect(cubit.state.compatibilityInfo, equals(tCompatibleInfo));
+        expect(cubit.state.status, ArStatus.initial);
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('checkCompatibility con dispositivo incompatible emite ArStatus.error con mensaje amigable', () async {
-      when(() => mockArService.checkCompatibility()).thenAnswer((_) async => tIncompatibleInfo);
+    test(
+      'checkCompatibility con dispositivo incompatible emite ArStatus.error con mensaje amigable',
+      () async {
+        when(
+          () => mockArService.checkCompatibility(),
+        ).thenAnswer((_) async => tIncompatibleInfo);
 
-      final cubit = buildCubit();
-      final result = await cubit.checkCompatibility();
+        final cubit = buildCubit();
+        final result = await cubit.checkCompatibility();
 
-      expect(result, isFalse);
-      expect(cubit.state.status, ArStatus.error);
-      expect(cubit.state.errorMessage, contains('no cuenta con la certificación oficial'));
+        expect(result, isFalse);
+        expect(cubit.state.status, ArStatus.error);
+        expect(
+          cubit.state.errorMessage,
+          contains('no cuenta con la certificación oficial'),
+        );
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('startArExperience en hardware incompatible no solicita permisos ni inicializa ARCore', () async {
-      when(() => mockArService.checkCompatibility()).thenAnswer((_) async => tIncompatibleInfo);
+    test(
+      'startArExperience en hardware incompatible no solicita permisos ni inicializa ARCore',
+      () async {
+        when(
+          () => mockArService.checkCompatibility(),
+        ).thenAnswer((_) async => tIncompatibleInfo);
 
-      final cubit = buildCubit();
-      final success = await cubit.startArExperience(storyId: tStoryId);
+        final cubit = buildCubit();
+        final success = await cubit.startArExperience(storyId: tStoryId);
 
-      expect(success, isFalse);
-      expect(cubit.state.status, ArStatus.error);
-      verifyNever(() => mockArService.requestCameraPermission());
-      verifyNever(() => mockArService.initializeSession());
+        expect(success, isFalse);
+        expect(cubit.state.status, ArStatus.error);
+        verifyNever(() => mockArService.requestCameraPermission());
+        verifyNever(() => mockArService.initializeSession());
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('startArExperience cuando se rechaza permiso de cámara emite ArStatus.error', () async {
-      when(() => mockArService.hasCameraPermission()).thenAnswer((_) async => false);
-      when(() => mockArService.requestCameraPermission()).thenAnswer((_) async => false);
+    test(
+      'startArExperience cuando se rechaza permiso de cámara emite ArStatus.error',
+      () async {
+        when(
+          () => mockArService.hasCameraPermission(),
+        ).thenAnswer((_) async => false);
+        when(
+          () => mockArService.requestCameraPermission(),
+        ).thenAnswer((_) async => false);
 
-      final cubit = buildCubit();
-      final success = await cubit.startArExperience(storyId: tStoryId);
+        final cubit = buildCubit();
+        final success = await cubit.startArExperience(storyId: tStoryId);
 
-      expect(success, isFalse);
-      expect(cubit.state.status, ArStatus.error);
-      expect(cubit.state.errorMessage, contains('permiso de acceso a la cámara'));
-      verifyNever(() => mockArService.initializeSession());
+        expect(success, isFalse);
+        expect(cubit.state.status, ArStatus.error);
+        expect(
+          cubit.state.errorMessage,
+          contains('permiso de acceso a la cámara'),
+        );
+        verifyNever(() => mockArService.initializeSession());
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('startArExperience exitoso inicializa sesión y activa escaneo de superficies', () async {
-      final cubit = buildCubit();
+    test(
+      'startArExperience exitoso inicializa sesión y activa escaneo de superficies',
+      () async {
+        final cubit = buildCubit();
 
-      final success = await cubit.startArExperience(storyId: tStoryId);
+        final success = await cubit.startArExperience(storyId: tStoryId);
 
-      expect(success, isTrue);
-      expect(cubit.state.status, ArStatus.scanningSurface);
-      expect(cubit.state.story, equals(tStory));
-      expect(cubit.state.pages.length, equals(2));
-      verify(() => mockArService.initializeSession()).called(1);
+        expect(success, isTrue);
+        expect(cubit.state.status, ArStatus.scanningSurface);
+        expect(cubit.state.story, equals(tStory));
+        expect(cubit.state.pages.length, equals(2));
+        verify(() => mockArService.initializeSession()).called(1);
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('detección de planos en el stream transiciona a surfaceDetected', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+    test(
+      'detección de planos en el stream transiciona a surfaceDetected',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      planesController.add([tPlane]);
-      await pumpEventQueue();
+        planesController.add([tPlane]);
+        await pumpEventQueue();
 
-      expect(cubit.state.status, ArStatus.surfaceDetected);
-      expect(cubit.state.detectedPlanes.length, equals(1));
-      expect(cubit.state.selectedPlane, equals(tPlane));
-      expect(cubit.state.canPlaceStory, isTrue);
+        expect(cubit.state.status, ArStatus.surfaceDetected);
+        expect(cubit.state.detectedPlanes.length, equals(1));
+        expect(cubit.state.selectedPlane, equals(tPlane));
+        expect(cubit.state.canPlaceStory, isFalse);
 
-      cubit.close();
-    });
+        // A plane elsewhere in the room must not enable placement at an empty reticle.
+        statusController.add(
+          const ArStatusUpdate(hasValidPlacementPoint: true),
+        );
+        await pumpEventQueue();
+        expect(cubit.state.canPlaceStory, isTrue);
 
-    test('placeStory ancla el cuento sobre la superficie detectada y pasa a storyPlaced', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+        cubit.close();
+      },
+    );
 
-      planesController.add([tPlane]);
-      await pumpEventQueue();
+    test(
+      'placeStory ancla el cuento sobre la superficie detectada y pasa a storyPlaced',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      final placed = await cubit.placeStory();
+        planesController.add([tPlane]);
+        await pumpEventQueue();
 
-      expect(placed, isTrue);
-      expect(cubit.state.status, ArStatus.storyPlaced);
-      expect(cubit.state.placedPlaneId, equals('plane-mesa-01'));
-      verify(() => mockArService.placeStoryAnchor('plane-mesa-01')).called(1);
+        final placed = await cubit.placeStory();
 
-      cubit.close();
-    });
+        expect(placed, isTrue);
+        expect(cubit.state.status, ArStatus.storyPlaced);
+        expect(cubit.state.placedPlaneId, equals('plane-mesa-01'));
+        verify(() => mockArService.placeStoryAnchor('plane-mesa-01')).called(1);
 
-    test('nextPage y previousPage controlan la paginación respetando límites', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+        cubit.close();
+      },
+    );
 
-      expect(cubit.state.currentPageIndex, 0);
-      expect(cubit.state.hasPreviousPage, isFalse);
-      expect(cubit.state.hasNextPage, isTrue);
+    test(
+      'nextPage y previousPage controlan la paginación respetando límites',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      cubit.nextPage();
-      expect(cubit.state.currentPageIndex, 1);
-      expect(cubit.state.hasPreviousPage, isTrue);
-      expect(cubit.state.hasNextPage, isFalse);
+        expect(cubit.state.currentPageIndex, 0);
+        expect(cubit.state.hasPreviousPage, isFalse);
+        expect(cubit.state.hasNextPage, isTrue);
 
-      // Intentar avanzar más allá de la última página no cambia el índice
-      cubit.nextPage();
-      expect(cubit.state.currentPageIndex, 1);
+        cubit.nextPage();
+        expect(cubit.state.currentPageIndex, 1);
+        expect(cubit.state.hasPreviousPage, isTrue);
+        expect(cubit.state.hasNextPage, isFalse);
 
-      cubit.previousPage();
-      expect(cubit.state.currentPageIndex, 0);
+        // Intentar avanzar más allá de la última página no cambia el índice
+        cubit.nextPage();
+        expect(cubit.state.currentPageIndex, 1);
 
-      // Intentar retroceder más allá de la primera página no cambia el índice
-      cubit.previousPage();
-      expect(cubit.state.currentPageIndex, 0);
+        cubit.previousPage();
+        expect(cubit.state.currentPageIndex, 0);
 
-      cubit.close();
-    });
+        // Intentar retroceder más allá de la primera página no cambia el índice
+        cubit.previousPage();
+        expect(cubit.state.currentPageIndex, 0);
+
+        cubit.close();
+      },
+    );
 
     test('exitAr detiene la sesión nativa y emite sessionEnded', () async {
       final cubit = buildCubit();
@@ -258,81 +338,98 @@ void main() {
       cubit.close();
     });
 
-    test('telemetría de tracking activo actualiza estado y habilita colocación ante hit en retícula', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+    test(
+      'telemetría de tracking activo actualiza estado y habilita colocación ante hit en retícula',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      statusController.add(const ArStatusUpdate(
-        sessionState: 'ACTIVE',
-        cameraTrackingState: 'TRACKING',
-        trackingFailureReason: 'NONE',
-        knownPlanesCount: 1,
-        validPlanesCount: 1,
-        hasValidPlacementPoint: true,
-        hasHitAtReticle: true,
-        placementPointType: 'CONFIRMED_PLANE',
-        hitDistanceMeters: 0.95,
-      ));
-      await pumpEventQueue();
+        statusController.add(
+          const ArStatusUpdate(
+            sessionState: 'ACTIVE',
+            cameraTrackingState: 'TRACKING',
+            trackingFailureReason: 'NONE',
+            knownPlanesCount: 1,
+            validPlanesCount: 1,
+            hasValidPlacementPoint: true,
+            hasHitAtReticle: true,
+            placementPointType: 'CONFIRMED_PLANE',
+            hitDistanceMeters: 0.95,
+          ),
+        );
+        await pumpEventQueue();
 
-      expect(cubit.state.isCameraTracking, isTrue);
-      expect(cubit.state.hasValidPlacementPoint, isTrue);
-      expect(cubit.state.hasHitAtReticle, isTrue);
-      expect(cubit.state.placementPointType, equals('CONFIRMED_PLANE'));
-      expect(cubit.state.canPlaceStory, isTrue);
-      expect(cubit.state.status, equals(ArStatus.surfaceDetected));
+        expect(cubit.state.isCameraTracking, isTrue);
+        expect(cubit.state.hasValidPlacementPoint, isTrue);
+        expect(cubit.state.hasHitAtReticle, isTrue);
+        expect(cubit.state.placementPointType, equals('CONFIRMED_PLANE'));
+        expect(cubit.state.canPlaceStory, isTrue);
+        expect(cubit.state.status, equals(ArStatus.surfaceDetected));
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('telemetría de cámara pausada actualiza trackingFailureReason', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+    test(
+      'telemetría de cámara pausada actualiza trackingFailureReason',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      statusController.add(const ArStatusUpdate(
-        sessionState: 'ACTIVE',
-        cameraTrackingState: 'PAUSED',
-        trackingFailureReason: 'EXCESSIVE_MOTION',
-        hasValidPlacementPoint: false,
-      ));
-      await pumpEventQueue();
+        statusController.add(
+          const ArStatusUpdate(
+            sessionState: 'ACTIVE',
+            cameraTrackingState: 'PAUSED',
+            trackingFailureReason: 'EXCESSIVE_MOTION',
+            hasValidPlacementPoint: false,
+          ),
+        );
+        await pumpEventQueue();
 
-      expect(cubit.state.isCameraTracking, isFalse);
-      expect(cubit.state.trackingFailureReason, equals('EXCESSIVE_MOTION'));
-      expect(cubit.state.hasValidPlacementPoint, isFalse);
+        expect(cubit.state.isCameraTracking, isFalse);
+        expect(cubit.state.trackingFailureReason, equals('EXCESSIVE_MOTION'));
+        expect(cubit.state.hasValidPlacementPoint, isFalse);
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('placeStoryAtCoordinates ancla cuento en coordenadas de pantalla', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+    test(
+      'placeStoryAtCoordinates ancla cuento en coordenadas de pantalla',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      final placed = await cubit.placeStoryAtCoordinates(400.0, 800.0);
+        final placed = await cubit.placeStoryAtCoordinates(400.0, 800.0);
 
-      expect(placed, isTrue);
-      expect(cubit.state.status, ArStatus.storyPlaced);
-      expect(cubit.state.placedPlaneId, equals('tap-anchor'));
-      verify(() => mockArService.placeStoryAtCoordinates(400.0, 800.0)).called(1);
+        expect(placed, isTrue);
+        expect(cubit.state.status, ArStatus.storyPlaced);
+        expect(cubit.state.placedPlaneId, equals('tap-anchor'));
+        verify(
+          () => mockArService.placeStoryAtCoordinates(400.0, 800.0),
+        ).called(1);
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
 
-    test('repositionStory regresa a surfaceDetected si hay planos o a scanningSurface', () async {
-      final cubit = buildCubit();
-      await cubit.startArExperience(storyId: tStoryId);
+    test(
+      'repositionStory regresa a surfaceDetected si hay planos o a scanningSurface',
+      () async {
+        final cubit = buildCubit();
+        await cubit.startArExperience(storyId: tStoryId);
 
-      planesController.add([tPlane]);
-      await pumpEventQueue();
-      await cubit.placeStory();
-      expect(cubit.state.isStoryPlaced, isTrue);
+        planesController.add([tPlane]);
+        await pumpEventQueue();
+        await cubit.placeStory();
+        expect(cubit.state.isStoryPlaced, isTrue);
 
-      cubit.repositionStory();
-      expect(cubit.state.isSurfaceDetected, isTrue);
-      expect(cubit.state.pages.length, equals(2));
+        cubit.repositionStory();
+        expect(cubit.state.isSurfaceDetected, isTrue);
+        expect(cubit.state.pages.length, equals(2));
 
-      cubit.close();
-    });
+        cubit.close();
+      },
+    );
   });
 }
-

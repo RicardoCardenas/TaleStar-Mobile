@@ -117,17 +117,22 @@ class ArState extends Equatable {
   bool get isError => status == ArStatus.error;
   bool get isSessionEnded => status == ArStatus.sessionEnded;
 
-  bool get canPlaceStory =>
-      hasValidPlacementPoint || selectedPlane != null || detectedPlanes.isNotEmpty;
+  bool get canPlaceStory => hasValidPlacementPoint;
   bool get isCameraTracking => cameraTrackingState == 'TRACKING';
-  bool get isConfirmedPlacement => placementPointType == 'CONFIRMED_PLANE';
+  bool get isConfirmedPlacement => const [
+    'CONFIRMED_PLANE',
+    'DEPTH_SURFACE',
+    'INSTANT_FULL',
+  ].contains(placementPointType);
+  bool get isEstimatedPlacement =>
+      hasValidPlacementPoint && !isConfirmedPlacement;
   bool get isInstantPlacement => placementPointType == 'INSTANT_PLACEMENT';
   bool get hasPages => pages.isNotEmpty;
 
   StoryPageDetail? get currentPage =>
       hasPages && currentPageIndex >= 0 && currentPageIndex < pages.length
-          ? pages[currentPageIndex]
-          : null;
+      ? pages[currentPageIndex]
+      : null;
 
   bool get hasPreviousPage => currentPageIndex > 0;
   bool get hasNextPage => currentPageIndex < pages.length - 1;
@@ -181,7 +186,9 @@ class ArState extends Equatable {
       status: status ?? this.status,
       compatibilityInfo: compatibilityInfo ?? this.compatibilityInfo,
       detectedPlanes: detectedPlanes ?? this.detectedPlanes,
-      selectedPlane: clearSelection ? null : (selectedPlane ?? this.selectedPlane),
+      selectedPlane: clearSelection
+          ? null
+          : (selectedPlane ?? this.selectedPlane),
       placedPlaneId: placedPlaneId ?? this.placedPlaneId,
       storyId: storyId ?? this.storyId,
       story: story ?? this.story,
@@ -189,20 +196,27 @@ class ArState extends Equatable {
       currentPageIndex: currentPageIndex ?? this.currentPageIndex,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       cardScale: resetTransform ? 1.0 : (cardScale ?? this.cardScale),
-      cardRotationY: resetTransform ? 0.0 : (cardRotationY ?? this.cardRotationY),
-      cardRotationX: resetTransform ? 0.0 : (cardRotationX ?? this.cardRotationX),
+      cardRotationY: resetTransform
+          ? 0.0
+          : (cardRotationY ?? this.cardRotationY),
+      cardRotationX: resetTransform
+          ? 0.0
+          : (cardRotationX ?? this.cardRotationX),
       cameraTrackingState: cameraTrackingState ?? this.cameraTrackingState,
-      trackingFailureReason: trackingFailureReason ?? this.trackingFailureReason,
+      trackingFailureReason:
+          trackingFailureReason ?? this.trackingFailureReason,
       frameTimestampNs: frameTimestampNs ?? this.frameTimestampNs,
       eventsSentCount: eventsSentCount ?? this.eventsSentCount,
       eventsReceivedCount: eventsReceivedCount ?? this.eventsReceivedCount,
       knownPlanesCount: knownPlanesCount ?? this.knownPlanesCount,
       validPlanesCount: validPlanesCount ?? this.validPlanesCount,
-      nonHorizontalPlanesCount: nonHorizontalPlanesCount ?? this.nonHorizontalPlanesCount,
+      nonHorizontalPlanesCount:
+          nonHorizontalPlanesCount ?? this.nonHorizontalPlanesCount,
       pausedPlanesCount: pausedPlanesCount ?? this.pausedPlanesCount,
       subsumedPlanesCount: subsumedPlanesCount ?? this.subsumedPlanesCount,
       planeDiscardReason: planeDiscardReason ?? this.planeDiscardReason,
-      hasValidPlacementPoint: hasValidPlacementPoint ?? this.hasValidPlacementPoint,
+      hasValidPlacementPoint:
+          hasValidPlacementPoint ?? this.hasValidPlacementPoint,
       hasHitAtReticle: hasHitAtReticle ?? this.hasHitAtReticle,
       placementPointType: placementPointType ?? this.placementPointType,
       hitDistanceMeters: hitDistanceMeters ?? this.hitDistanceMeters,
@@ -223,45 +237,45 @@ class ArState extends Equatable {
 
   @override
   List<Object?> get props => [
-        status,
-        compatibilityInfo,
-        detectedPlanes,
-        selectedPlane,
-        placedPlaneId,
-        storyId,
-        story,
-        pages,
-        currentPageIndex,
-        errorMessage,
-        cardScale,
-        cardRotationY,
-        cardRotationX,
-        cameraTrackingState,
-        trackingFailureReason,
-        frameTimestampNs,
-        eventsSentCount,
-        eventsReceivedCount,
-        knownPlanesCount,
-        validPlanesCount,
-        nonHorizontalPlanesCount,
-        pausedPlanesCount,
-        subsumedPlanesCount,
-        planeDiscardReason,
-        hasValidPlacementPoint,
-        hasHitAtReticle,
-        placementPointType,
-        hitDistanceMeters,
-        anchorScreenX,
-        anchorScreenY,
-        anchorNormX,
-        anchorNormY,
-        anchorDistance,
-        anchorYaw,
-        anchorPitch,
-        isAnchorTracking,
-        isAnchorInView,
-        viewportWidth,
-        viewportHeight,
-        lastTelemetryUpdate,
-      ];
+    status,
+    compatibilityInfo,
+    detectedPlanes,
+    selectedPlane,
+    placedPlaneId,
+    storyId,
+    story,
+    pages,
+    currentPageIndex,
+    errorMessage,
+    cardScale,
+    cardRotationY,
+    cardRotationX,
+    cameraTrackingState,
+    trackingFailureReason,
+    frameTimestampNs,
+    eventsSentCount,
+    eventsReceivedCount,
+    knownPlanesCount,
+    validPlanesCount,
+    nonHorizontalPlanesCount,
+    pausedPlanesCount,
+    subsumedPlanesCount,
+    planeDiscardReason,
+    hasValidPlacementPoint,
+    hasHitAtReticle,
+    placementPointType,
+    hitDistanceMeters,
+    anchorScreenX,
+    anchorScreenY,
+    anchorNormX,
+    anchorNormY,
+    anchorDistance,
+    anchorYaw,
+    anchorPitch,
+    isAnchorTracking,
+    isAnchorInView,
+    viewportWidth,
+    viewportHeight,
+    lastTelemetryUpdate,
+  ];
 }
